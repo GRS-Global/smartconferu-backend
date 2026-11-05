@@ -1,0 +1,75 @@
+import { generateKeyPairSync } from 'node:crypto';
+import { validateEnv } from './env.js';
+
+const pem = generateKeyPairSync('ed25519')
+  .privateKey.export({ type: 'pkcs8', format: 'pem' })
+  .toString();
+
+const minimal = {
+  DATABASE_URL: 'postgresql://app:secret@db.example.com:5432/smartconferu',
+  APP_URL: 'https://app.example.com',
+  JWT_PRIVATE_KEY: pem,
+  TOKEN_HASH_SECRET: 'x'.repeat(32),
+  MFA_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+  API_URL: 'https://api.example.com',
+};
+
+describe('validateEnv', () => {
+  it('applies defaults to a minimal configuration', () => {
+    const env = validateEnv(minimal);
+    expect(env).toMatchObject({
+      NODE_ENV: 'development',
+      PORT: 3000,
+      DATABASE_POOL_MAX: 10,
+      CORS_ORIGINS: ['http://localhost:5173'],
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_DAYS: 30,
+      REFRESH_COOKIE_SAMESITE: 'lax',
+      EMAIL_TRANSPORT: 'log',
+      RATE_LIMIT_ENABLED: true,
+    });
+    // Unset means "decide by NODE_ENV" (see setupApp and the auth cookie).
+    expect(env.SWAGGER_ENABLED).toBeUndefined();
+    expect(env.REFRESH_COOKIE_SECURE).toBeUndefined();
+  });
+
+  it('parses lists, numbers and booleans from strings', () => {
+    const env = validateEnv({
+      ...minimal,
+      PORT: '8080',
+      CORS_ORIGINS: 'https://a.example, https://b.example ,',
+      SWAGGER_ENABLED: 'false',
+    });
+    expect(env.PORT).toBe(8080);
+    expect(env.CORS_ORIGINS).toEqual([
+      'https://a.example',
+      'https://b.example',
+    ]);
+    expect(env.SWAGGER_ENABLED).toBe(false);
+  });
+
+  it('accepts the signing key base64-encoded, as stored in a secret manager', () => {
+    const env = validateEnv({
+      ...minimal,
+      JWT_PRIVATE_KEY: Buffer.from(pem).toString('base64'),
+    });
+    expect(env.JWT_PRIVATE_KEY).toBe(pem);
+  });
+
+  it('names every missing or invalid variable', () => {
+    expect(() =>
+      validateEnv({ DATABASE_URL: 'mysql://x', TOKEN_HASH_SECRET: 'short' }),
+    ).toThrow(
+      /DATABASE_URL[\s\S]*APP_URL[\s\S]*JWT_PRIVATE_KEY[\s\S]*TOKEN_HASH_SECRET/,
+    );
+  });
+
+  it('refuses to run production without a real email provider', () => {
+    expect(() => validateEnv({ ...minimal, NODE_ENV: 'production' })).toThrow(
+      /EMAIL_TRANSPORT: must not be "log" in production/,
+    );
+    expect(() =>
+      validateEnv({ ...minimal, EMAIL_TRANSPORT: 'resend' }),
+    ).toThrow(/RESEND_API_KEY: is required/);
+  });
+});

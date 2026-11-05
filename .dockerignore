@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.pglite
+.pglite-dev
+.env
+.env.*
+test
+scripts
+*.md

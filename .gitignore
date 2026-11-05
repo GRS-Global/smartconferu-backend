@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local databases built from supabase/migrations (npm run db:pull / db:serve)
+.pglite/
+.pglite-dev/
+
+.env
+.env.*
+!.env.example
