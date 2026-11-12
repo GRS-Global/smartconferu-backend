@@ -54,10 +54,12 @@ api/
 │  │  ├─ audit/            AuditService → audit_log table
 │  │  ├─ http/             client IP / user agent, rate limiter
 │  │  ├─ health/           /health (process up), /health/ready (database reachable)
+│  │  ├─ notifications/    in-app notifications (the bell), written with each change
 │  │  └─ validation/       shared input validators
 │  ├─ modules/             features, one folder each
 │  │  ├─ auth/             register, sign-in, sessions, two-step, providers, email change
 │  │  ├─ users/            /me: my profile, Terms acceptance, my conferences
+│  │  ├─ conferences/      conferences, Call for Papers, team and invitations
 │  │  └─ admin/            super-admin endpoints
 │  └─ types/express.d.ts   adds request.user
 ├─ drizzle/                SQL migrations generated from the schema (0000, 0001, …)
@@ -99,9 +101,10 @@ created with `new`.
 ## Conventions
 
 - **Every route is private** unless marked `@Public()`. `@CurrentUser()` gives the signed-in user.
-- **Permissions** are decided in one place, `AccessService` (`core/rbac`). Use
-  `@ConfRoles('chair', …)` on routes with `:conferenceId`, or call `AccessService` from a service.
-  Super-admin powers (`@SuperAdminOnly()`) need a session that passed two-step verification.
+- **Permissions** are decided in one place, `core/rbac` (see [Permissions](#permissions)). Use
+  `@ConfRoles('chair', …)` on routes with `:conferenceId`, or load a snapshot with `AccessService`
+  and check a rule from `access-rules.ts` in the service. Super-admin powers (`@SuperAdminOnly()`)
+  need a session that passed two-step verification.
 - **Errors:** throw `AppException` with a stable `code` (listed in `core/errors/app.exception.ts`).
   Every error response is `{ statusCode, code, message, details?, requestId }`. Unexpected errors
   become a generic 500 (logged with the `requestId`, details never sent to the client); an
@@ -112,6 +115,30 @@ created with `new`.
   `AuditService.record(...)`.
 - **Settings** are read with `ConfigService` and declared in `config/env.ts`. A new setting goes
   in both `env.ts` and `.env.example`.
+
+## Permissions
+
+Every rule of who may do what lives in `core/rbac/access-rules.ts`, one plain function per rule
+(`canEditCfp`, `canViewSubmission`, `canWithdraw`, `canWriteReview`…). They replace the old
+Supabase RLS policies and the checks inside its SQL functions; each says which one it replaces, and
+`access-rules.spec.ts` tests every case.
+
+1. In a service, load a snapshot of the user's standing:
+   - `access.requireConference(user, conferenceId, tx)` → `ConferenceAccess` (roles, team, author,
+     creator, super admin), or
+   - `access.requireSubmission(user, submissionId, tx)` → `SubmissionAccess` (the conference
+     snapshot plus submitter, linked author, claimed, the user's review assignment, outcome).
+
+   Both answer **404** when the user may not see the thing at all, so ids don't leak.
+
+2. Check the rule and throw `AppException.forbidden('…')` with a message saying who may.
+
+- A **chair** is a chair or track chair. A **super admin** in a two-step-verified session counts as a
+  chair everywhere.
+- Rows that are simply the user's own (profile, notifications, own AI usage) are filtered in the
+  query (`where user_id = me`), not by a rule.
+- One deliberate change: authors need a **published** CFP to submit (the old 0021 migration
+  dropped that check by mistake); a chair may submit on an author's behalf at any time.
 
 ## Accounts and sign-in (modules/auth)
 
@@ -148,6 +175,30 @@ How it works:
   (`/auth/email/change`) or connects to the account that owns it (`/auth/account/merge`).
 - **Terms of Service:** register requires `termsVersion`; the API stores the version and time on
   the account (`users.terms_accepted_at`). `POST /me/terms` records a later acceptance.
+
+## Conferences, CFP and team (modules/conferences)
+
+| Who             | Can                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| Anyone          | `GET /public/cfps` (Smart CFP directory), `GET /public/conferences/{slug}` (submission link)  |
+| Signed in       | `POST /conferences` (request one; becomes its chair), `GET /conferences` (mine + my requests) |
+| Chairs          | edit details and settings, archive / restore, ask for deletion, invite and remove the team    |
+| Chairs, CFP mgr | edit, publish and close the CFP                                                               |
+| Invited person  | `GET /invitations`, accept or decline                                                         |
+| Super admin     | approve or decline requests, decide deletion requests, undelete (`/admin/…`)                  |
+
+- **Lifecycle:** `pending_approval` → (super admin) `active` or `rejected`; `active` ⇄ `archived`;
+  `archived` → deletion request → (super admin) `deleted` → (super admin) back to `archived`.
+- **CFP:** `draft` → `published` (only once the conference is active; submissions open) →
+  `closed`. Outside the team a CFP is only ever seen as published or closed.
+- **Who sees a conference:** its creator, its team (not removed), verified super admins, and
+  authors once it is live or archived. Anyone else gets 404, not 403, so ids don't leak.
+- **Team:** inviting links the account with that email now, or when it signs up. Accepting turns
+  papers queued for the invitation into review requests; declining hands back papers already
+  given. Removing a reviewer withdraws their open assignments and keeps submitted reviews. The
+  last chair can't be removed.
+- These rules are the old Supabase RLS policies and SQL functions, now in `core/rbac/access-rules.ts`
+  and the module's services.
 
 ## Database
 

@@ -65,6 +65,19 @@ export class AppException extends HttpException {
     return new AppException(HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, message);
   }
 
+  /** The request is valid but the current state doesn't allow it (422), e.g. archiving a draft. */
+  static businessRule(message: string): AppException {
+    return new AppException(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      ErrorCode.BUSINESS_RULE,
+      message,
+    );
+  }
+
+  static conflict(message: string): AppException {
+    return new AppException(HttpStatus.CONFLICT, ErrorCode.CONFLICT, message);
+  }
+
   static validation(message: string, details?: unknown): AppException {
     return new AppException(
       HttpStatus.BAD_REQUEST,

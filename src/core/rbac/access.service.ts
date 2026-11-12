@@ -3,9 +3,29 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { AuthUser } from '../auth/auth-user.js';
 import { DatabaseService } from '../database/database.service.js';
 import type { Executor } from '../database/database.types.js';
-import { conferenceMembers, userMfa, users } from '../database/schema/index.js';
+import {
+  conferenceMembers,
+  conferences,
+  reviewAssignments,
+  submissionAuthors,
+  submissions,
+  userMfa,
+  users,
+} from '../database/schema/index.js';
 import { AppException, ErrorCode } from '../errors/app.exception.js';
-import type { MemberRole } from './conf-roles.decorator.js';
+import * as rules from './access-rules.js';
+import type {
+  ConferenceAccess,
+  MemberRole,
+  SubmissionAccess,
+} from './access-rules.js';
+
+export {
+  CFP_ROLES,
+  CHAIR_ROLES,
+  type ConferenceAccess,
+  type SubmissionAccess,
+} from './access-rules.js';
 
 /**
  * Who may do what. Every permission decision in the API goes through here, so the rules live in
@@ -91,6 +111,160 @@ export class AccessService {
     if (!(await this.hasConfRole(user, conferenceId, roles, executor))) {
       throw AppException.forbidden();
     }
+  }
+
+  /**
+   * The user's standing in a conference; undefined when the conference doesn't exist (or is
+   * deleted, unless the user is a super admin).
+   */
+  async conferenceAccess(
+    user: AuthUser,
+    conferenceId: string,
+    executor: Executor = this.database.db,
+  ): Promise<ConferenceAccess | undefined> {
+    const [row] = await executor
+      .select({
+        status: conferences.status,
+        createdBy: conferences.createdBy,
+        superAdminAccount: sql<boolean>`coalesce((
+          select ${users.isSuperAdmin} from ${users}
+          where ${users.id} = ${user.id} and ${users.status} = 'active'), false)`,
+        activeRoles: sql<MemberRole[]>`coalesce((
+          select array_agg(distinct ${conferenceMembers.role}::text)
+          from ${conferenceMembers}
+          where ${conferenceMembers.conferenceId} = ${conferenceId}
+            and ${conferenceMembers.userId} = ${user.id}
+            and ${conferenceMembers.status} = 'active'), '{}')`,
+        isTeamMember: sql<boolean>`exists (
+          select 1 from ${conferenceMembers}
+          where ${conferenceMembers.conferenceId} = ${conferenceId}
+            and ${conferenceMembers.userId} = ${user.id}
+            and ${conferenceMembers.status} <> 'removed')`,
+        isAuthor: sql<boolean>`exists (
+          select 1 from ${submissions}
+          where ${submissions.conferenceId} = ${conferenceId}
+            and (${submissions.submitterId} = ${user.id} or ${submissions.id} in (
+              select ${submissionAuthors.submissionId} from ${submissionAuthors}
+              where ${submissionAuthors.userId} = ${user.id})))`,
+      })
+      .from(conferences)
+      .where(eq(conferences.id, conferenceId));
+    if (!row) {
+      return undefined;
+    }
+    const isSuperAdmin = row.superAdminAccount && user.mfa;
+    if (row.status === 'deleted' && !isSuperAdmin) {
+      return undefined;
+    }
+    return {
+      conferenceId,
+      status: row.status,
+      isCreator: row.createdBy === user.id,
+      isSuperAdmin,
+      activeRoles: row.activeRoles,
+      isTeamMember: row.isTeamMember,
+      isAuthor: row.isAuthor,
+    };
+  }
+
+  /** The user holds one of `roles` actively, or is a verified super admin. */
+  static hasRole(
+    access: ConferenceAccess,
+    roles: readonly MemberRole[],
+  ): boolean {
+    return rules.hasRole(access, roles);
+  }
+
+  /** See rules.canViewConference. */
+  static canViewConference(access: ConferenceAccess): boolean {
+    return rules.canViewConference(access);
+  }
+
+  /** Throws 404 when the conference doesn't exist or the user may not see it at all. */
+  async requireConference(
+    user: AuthUser,
+    conferenceId: string,
+    executor?: Executor,
+  ): Promise<ConferenceAccess> {
+    const access = await this.conferenceAccess(user, conferenceId, executor);
+    if (!access || !AccessService.canViewConference(access)) {
+      // Not 403: don't confirm that a conference the user can't see exists.
+      throw AppException.notFound('The conference');
+    }
+    return access;
+  }
+
+  /**
+   * The user's standing on a paper; undefined when the paper doesn't exist or its conference is
+   * deleted (unless the user is a super admin). Two queries: the paper, then its conference.
+   */
+  async submissionAccess(
+    user: AuthUser,
+    submissionId: string,
+    executor: Executor = this.database.db,
+  ): Promise<SubmissionAccess | undefined> {
+    const [row] = await executor
+      .select({
+        conferenceId: submissions.conferenceId,
+        status: submissions.status,
+        outcome: submissions.outcome,
+        notifiedOutcome: submissions.notifiedOutcome,
+        submitterId: submissions.submitterId,
+        reviewMode: conferences.reviewMode,
+        isListedAuthor: sql<boolean>`exists (
+          select 1 from ${submissionAuthors}
+          where ${submissionAuthors.submissionId} = ${submissionId}
+            and ${submissionAuthors.userId} = ${user.id})`,
+        isClaimed: sql<boolean>`exists (
+          select 1 from ${submissionAuthors}
+          where ${submissionAuthors.submissionId} = ${submissionId}
+            and ${submissionAuthors.userId} is not null)`,
+        assignmentStatus: sql<
+          SubmissionAccess['assignmentStatus']
+        >`(select ${reviewAssignments.status}::text from ${reviewAssignments}
+          where ${reviewAssignments.submissionId} = ${submissionId}
+            and ${reviewAssignments.reviewerId} = ${user.id}
+          limit 1)`,
+      })
+      .from(submissions)
+      .innerJoin(conferences, eq(conferences.id, submissions.conferenceId))
+      .where(eq(submissions.id, submissionId));
+    if (!row) {
+      return undefined;
+    }
+    const conference = await this.conferenceAccess(
+      user,
+      row.conferenceId,
+      executor,
+    );
+    if (!conference) {
+      return undefined;
+    }
+    return {
+      submissionId,
+      conference,
+      reviewMode: row.reviewMode,
+      status: row.status,
+      outcome: row.outcome,
+      notifiedOutcome: row.notifiedOutcome,
+      isSubmitter: row.submitterId === user.id,
+      isListedAuthor: row.isListedAuthor,
+      isClaimed: row.isClaimed,
+      assignmentStatus: row.assignmentStatus,
+    };
+  }
+
+  /** Throws 404 when the paper doesn't exist or the user may not see it (rules.canViewSubmission). */
+  async requireSubmission(
+    user: AuthUser,
+    submissionId: string,
+    executor?: Executor,
+  ): Promise<SubmissionAccess> {
+    const access = await this.submissionAccess(user, submissionId, executor);
+    if (!access || !rules.canViewSubmission(access)) {
+      throw AppException.notFound('The paper');
+    }
+    return access;
   }
 
   private async isSuperAdminAccount(

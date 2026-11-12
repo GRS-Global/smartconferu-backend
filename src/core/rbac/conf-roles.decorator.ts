@@ -1,7 +1,7 @@
 import { SetMetadata } from '@nestjs/common';
-import type { memberRole } from '../database/schema/index.js';
+import type { MemberRole } from './access-rules.js';
 
-export type MemberRole = (typeof memberRole.enumValues)[number];
+export type { MemberRole };
 
 export const CONF_ROLES = 'rbac:confRoles';
 
