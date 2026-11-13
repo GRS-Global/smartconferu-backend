@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   index,
+  integer,
   pgTable,
   primaryKey,
   text,
@@ -75,7 +76,12 @@ export const conferenceEmailTemplates = pgTable(
   (t) => [primaryKey({ columns: [t.conferenceId, t.key] })],
 );
 
-/** Every email sent (or attempted) for a conference. */
+/**
+ * Every email the platform sends, and the queue they are sent from. A change and its emails are
+ * written in one transaction (status `queued`); the email worker sends them (`sending` → `sent`, or
+ * back to `queued` with a later `next_attempt_at` until the attempts run out → `failed`). The chairs
+ * read their conference's rows as Email Logs.
+ */
 export const emailLog = pgTable(
   'email_log',
   {
@@ -93,17 +99,32 @@ export const emailLog = pgTable(
     toName: text('to_name'),
     recipientType: text('recipient_type'),
     subject: text().notNull(),
+    /** The message as the template produced it (shown in Email Logs). */
     body: text(),
-    status: text().notNull(),
+    /** What is sent: the body in the platform frame, and its plain-text version. */
+    html: text(),
+    text: text(),
+    replyTo: text('reply_to'),
+    status: text().notNull().default('queued'),
+    attempts: integer().notNull().default(0),
+    nextAttemptAt: timestamptz('next_attempt_at').defaultNow(),
     providerId: text('provider_id'),
     error: text(),
+    sentAt: timestamptz('sent_at'),
     sentBy: uuid('sent_by').references(() => users.id, {
       onDelete: 'set null',
     }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     index('email_log_conference_idx').on(t.conferenceId, t.createdAt.desc()),
-    check('email_log_status_check', sql`${t.status} in ('sent', 'failed')`),
+    index('email_log_queue_idx')
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} = 'queued'`),
+    check(
+      'email_log_status_check',
+      sql`${t.status} in ('queued', 'sending', 'sent', 'failed')`,
+    ),
   ],
 );

@@ -16,10 +16,13 @@ import { AppThrottlerGuard } from './core/http/app-throttler.guard.js';
 import { HealthController } from './core/health/health.controller.js';
 import { ConferenceRoleGuard } from './core/rbac/conference-role.guard.js';
 import { NotificationsModule } from './core/notifications/notifications.module.js';
+import { PlanModule } from './core/plan/plan.service.js';
+import { StorageModule } from './core/storage/storage.module.js';
 import { RbacModule } from './core/rbac/rbac.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ConferencesModule } from './modules/conferences/conferences.module.js';
+import { SubmissionsModule } from './modules/submissions/submissions.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
 const REQUEST_ID = /^[\w.-]{1,128}$/;
@@ -84,11 +87,14 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
     AuditModule,
     EmailModule,
     NotificationsModule,
+    StorageModule,
+    PlanModule,
     AuthCoreModule,
     RbacModule,
     AuthModule,
     UsersModule,
     ConferencesModule,
+    SubmissionsModule,
     AdminModule,
   ],
   controllers: [HealthController],

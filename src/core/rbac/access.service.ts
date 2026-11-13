@@ -254,6 +254,30 @@ export class AccessService {
     };
   }
 
+  /** The user's own review assignment on each of these papers (for lists; one query). */
+  async assignmentStatuses(
+    user: AuthUser,
+    submissionIds: readonly string[],
+    executor: Executor = this.database.db,
+  ): Promise<Map<string, SubmissionAccess['assignmentStatus']>> {
+    if (submissionIds.length === 0) {
+      return new Map();
+    }
+    const rows = await executor
+      .select({
+        submissionId: reviewAssignments.submissionId,
+        status: reviewAssignments.status,
+      })
+      .from(reviewAssignments)
+      .where(
+        and(
+          eq(reviewAssignments.reviewerId, user.id),
+          inArray(reviewAssignments.submissionId, [...submissionIds]),
+        ),
+      );
+    return new Map(rows.map((r) => [r.submissionId, r.status]));
+  }
+
   /** Throws 404 when the paper doesn't exist or the user may not see it (rules.canViewSubmission). */
   async requireSubmission(
     user: AuthUser,

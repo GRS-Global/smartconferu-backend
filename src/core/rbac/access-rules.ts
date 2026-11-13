@@ -210,8 +210,9 @@ export const canViewDeletionRequests = isChair;
 export const canViewConferenceAiUsage = isChair;
 
 /**
- * Make a new submission. The conference must be active. Authors need a published CFP and must be
- * before the submission deadline; a chair may submit on an author's behalf at any time.
+ * Make a new submission. The conference must be active and its CFP published, for everyone
+ * (a draft or closed CFP takes no papers, not even from a chair). Authors must also be before the
+ * submission deadline; a chair may submit on an author's behalf after it.
  * Replaces: submissions: author creates (0006, 0021).
  */
 export function canSubmit(
@@ -222,16 +223,13 @@ export function canSubmit(
     now: Date;
   },
 ): boolean {
-  if (access.status !== 'active') {
+  if (access.status !== 'active' || window.cfpStatus !== 'published') {
     return false;
   }
-  if (isChair(access)) {
-    return true;
-  }
   return (
-    window.cfpStatus === 'published' &&
-    (window.submissionDeadline === null ||
-      window.now.getTime() <= window.submissionDeadline.getTime())
+    isChair(access) ||
+    window.submissionDeadline === null ||
+    window.now.getTime() <= window.submissionDeadline.getTime()
   );
 }
 

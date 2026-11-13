@@ -191,14 +191,27 @@ describe('access rules: conference', () => {
       );
     });
 
-    it('lets a chair submit on behalf of an author at any time, while the conference is active', () => {
+    it('lets a chair submit on behalf of an author after the deadline, while the CFP is published', () => {
       const late = {
-        cfpStatus: 'closed' as const,
+        cfpStatus: 'published' as const,
         submissionDeadline: new Date('2027-01-01'),
         now,
       };
       expect(rules.canSubmit(chair(), late)).toBe(true);
+      expect(rules.canSubmit(superAdmin, late)).toBe(true);
       expect(rules.canSubmit(chair({ status: 'archived' }), late)).toBe(false);
+    });
+
+    it('refuses everyone, chairs included, when the CFP is not published', () => {
+      for (const cfpStatus of [
+        'draft',
+        'in_review',
+        'rejected',
+        'closed',
+      ] as const) {
+        expect(rules.canSubmit(chair(), { ...open, cfpStatus })).toBe(false);
+        expect(rules.canSubmit(superAdmin, { ...open, cfpStatus })).toBe(false);
+      }
       expect(
         rules.canSubmit(conference({ status: 'pending_approval' }), open),
       ).toBe(false);

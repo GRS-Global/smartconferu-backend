@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { CfpsService } from './cfps.service.js';
 import { ConferenceAdminController } from './conference-admin.controller.js';
 import { ConferenceAdminService } from './conference-admin.service.js';
+import { ConferenceEmailsService } from './conference-emails.service.js';
 import { ConferencesController } from './conferences.controller.js';
 import { ConferencesRepository } from './conferences.repository.js';
 import { ConferencesService } from './conferences.service.js';
@@ -19,6 +20,7 @@ import { PublicConferencesController } from './public-conferences.controller.js'
     ConferenceAdminController,
   ],
   providers: [
+    ConferenceEmailsService,
     ConferencesService,
     CfpsService,
     MembersService,

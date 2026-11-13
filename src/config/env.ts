@@ -92,6 +92,21 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   /** e.g. "Smartconferu <no-reply@smartconferu.com>" */
   EMAIL_FROM: z.string().default('Smartconferu <no-reply@localhost>'),
+  /** Send the email queue from this process (off in tests, which send it on demand). */
+  EMAIL_QUEUE_ENABLED: bool.default(true),
+  /** How often the queue is checked for emails to send. */
+  EMAIL_QUEUE_INTERVAL_MS: z.coerce.number().int().min(500).default(5000),
+  /** Emails sent per batch (Resend takes up to 100 in one request). */
+  EMAIL_QUEUE_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(50),
+  /** Tries before an email is marked failed. */
+  EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+
+  /** Where uploaded files (papers, reports) are kept. `local`: a folder on this machine (development). */
+  FILE_STORAGE_DRIVER: z.enum(['local']).default('local'),
+  /** The folder for FILE_STORAGE_DRIVER=local. */
+  FILE_STORAGE_DIR: z.string().default('./storage'),
+  /** Largest file accepted, in megabytes. */
+  MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(100).default(25),
 
   /** Serve the OpenAPI docs at /docs. Off by default in production. */
   SWAGGER_ENABLED: bool.optional(),

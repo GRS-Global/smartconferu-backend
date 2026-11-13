@@ -13,6 +13,7 @@ import {
   type ConferenceAccess,
 } from '../../core/rbac/access.service.js';
 import type { MemberRole } from '../../core/rbac/conf-roles.decorator.js';
+import { ConferenceEmailsService } from './conference-emails.service.js';
 import { displayName } from './conference.mapper.js';
 import type {
   InvitationResponse,
@@ -65,6 +66,7 @@ export class MembersService {
     private readonly members: MembersRepository,
     private readonly access: AccessService,
     private readonly notifications: NotificationsService,
+    private readonly emails: ConferenceEmailsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -145,6 +147,18 @@ export class MembersService {
           body: await this.members.conferenceLabel(tx, conferenceId),
           conferenceId,
         });
+      }
+      if (role === 'reviewer') {
+        await this.emails.reviewerInvited(
+          tx,
+          await this.emails.facts(tx, conferenceId),
+          {
+            userId: member.userId,
+            email: member.invitedEmail ?? email,
+            name: member.displayName,
+          },
+          user.id,
+        );
       }
       await this.record(tx, 'member.invited', user, member, client, { role });
       const created = await this.members.findWithPerson(tx, member.id);
@@ -257,7 +271,17 @@ export class MembersService {
         declineReason: accept ? null : (reason ?? null),
       });
       if (accept) {
-        await this.members.activatePendingAssignments(tx, member, user.id);
+        const papers = await this.members.activatePendingAssignments(
+          tx,
+          member,
+          user.id,
+        );
+        await this.emails.invitationAccepted(
+          tx,
+          await this.emails.facts(tx, member.conferenceId),
+          { userId: user.id, role: member.role },
+          papers,
+        );
       } else {
         await this.members.declineOpenAssignments(
           tx,

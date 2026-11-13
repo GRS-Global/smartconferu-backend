@@ -212,7 +212,7 @@ export class MembersRepository {
     tx: Executor,
     member: MemberRow,
     reviewerId: string,
-  ): Promise<void> {
+  ): Promise<{ submissionId: string; dueAt: Date | null }[]> {
     const waiting = await tx
       .select({
         submissionId: pendingReviewAssignments.submissionId,
@@ -230,12 +230,17 @@ export class MembersRepository {
           inArray(submissions.outcome, [...OPEN_OUTCOMES]),
         ),
       );
-    if (waiting.length > 0) {
-      await tx
-        .insert(reviewAssignments)
-        .values(waiting.map((w) => ({ ...w, reviewerId })))
-        .onConflictDoNothing();
+    if (waiting.length === 0) {
+      return [];
     }
+    return tx
+      .insert(reviewAssignments)
+      .values(waiting.map((w) => ({ ...w, reviewerId })))
+      .onConflictDoNothing()
+      .returning({
+        submissionId: reviewAssignments.submissionId,
+        dueAt: reviewAssignments.dueAt,
+      });
   }
 
   async deletePendingAssignments(

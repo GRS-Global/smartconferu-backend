@@ -49,17 +49,20 @@ api/
 │  │  ├─ auth/             access tokens, passwords, crypto helpers, the sign-in guard
 │  │  ├─ rbac/             permissions: AccessService, @ConfRoles, @SuperAdminOnly
 │  │  ├─ database/         connection, transactions; schema/ = every table
-│  │  ├─ email/            sending email (console in development, Resend in production)
+│  │  ├─ email/            templates, the email queue and its worker, Resend / console
 │  │  ├─ errors/           AppException + the filter that shapes every error response
 │  │  ├─ audit/            AuditService → audit_log table
 │  │  ├─ http/             client IP / user agent, rate limiter
 │  │  ├─ health/           /health (process up), /health/ready (database reachable)
 │  │  ├─ notifications/    in-app notifications (the bell), written with each change
+│  │  ├─ storage/          FileStorage: uploaded files (local folder; S3-compatible later)
+│  │  ├─ plan/             PlanService: which paid features a conference has (all free now)
 │  │  └─ validation/       shared input validators
 │  ├─ modules/             features, one folder each
 │  │  ├─ auth/             register, sign-in, sessions, two-step, providers, email change
 │  │  ├─ users/            /me: my profile, Terms acceptance, my conferences
 │  │  ├─ conferences/      conferences, Call for Papers, team and invitations
+│  │  ├─ submissions/      papers: submit, lists, paper page, edit, withdraw, screening
 │  │  └─ admin/            super-admin endpoints
 │  └─ types/express.d.ts   adds request.user
 ├─ drizzle/                SQL migrations generated from the schema (0000, 0001, …)
@@ -137,8 +140,9 @@ Supabase RLS policies and the checks inside its SQL functions; each says which o
   chair everywhere.
 - Rows that are simply the user's own (profile, notifications, own AI usage) are filtered in the
   query (`where user_id = me`), not by a rule.
-- One deliberate change: authors need a **published** CFP to submit (the old 0021 migration
-  dropped that check by mistake); a chair may submit on an author's behalf at any time.
+- Submitting needs a **published** CFP, for everyone (the old 0021 migration dropped that check
+  by mistake). A chair may submit on an author's behalf after the deadline, never to a draft or
+  closed CFP.
 
 ## Accounts and sign-in (modules/auth)
 
@@ -199,6 +203,84 @@ How it works:
   last chair can't be removed.
 - These rules are the old Supabase RLS policies and SQL functions, now in `core/rbac/access-rules.ts`
   and the module's services.
+
+## Submissions and screening (modules/submissions)
+
+| Who               | Can                                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| Signed in         | `POST /conferences/{id}/submissions` (CFP published, before the deadline), `GET /submissions` |
+| Authors           | the paper page, edit title/abstract/keywords until a decision, withdraw                       |
+| Submitter         | replace the author list (`PUT /submissions/{id}/authors`) until a decision                    |
+| Chairs            | every paper, submit on an author's behalf (after the deadline too), screening, decisions      |
+| Assigned reviewer | the paper page (no authors under double-blind review)                                         |
+
+- **Paper ids:** numbered per conference (`ICX-1`, `ICX-2` …) from `conferences.next_paper_no`.
+- **Authors:** each email once, at least one corresponding. An author whose email has an account
+  is linked at once, anyone else when they sign up; a linked author has "claimed" the paper. A
+  chair who submitted for an author can edit the paper only until an author claims it.
+- **Views:** `GET /submissions/{id}` answers with `view` = `chair`, `author` or `reviewer`. Authors
+  see only what they were told: a recorded but unsent decision reads as `no_decision`. `can`
+  says what the signed-in user may do now (edit, withdraw, decide…).
+- **Files:** `POST /submissions/{id}/files` (multipart `file`, optional `supplementary=true`)
+  stores the next paper version (v1, v2 …; PDF or Word, checked by content, up to
+  `MAX_UPLOAD_MB`). The first one moves the paper from `upload_pending` to `no_decision`; later
+  ones tell the chairs there is a new version to check. `GET /submissions/{id}/files/{fileId}`
+  downloads it. Files go through `FileStorage` (`core/storage`): a local folder now, an
+  S3-compatible driver once the hosting is chosen.
+- **Screening:** `GET/PUT /conferences/{id}/screening-settings` (steps, criteria, AI mode).
+  `PUT /submissions/{id}/screening/{version}` saves the chair's record of that version (checked:
+  the version must exist, allowed decisions, page counts, percentages, dates, file paths, and the
+  plagiarism step only after a passed initial check); a decision the chair sets is marked
+  `chairSet`. `POST …/notify` emails the authors the correction, revision or rejection.
+  `POST /submissions/{id}/decision` records a decision or a stage (e.g. "Plagiarism clear").
+- **Not yet:** sending decisions to authors (the decisions module).
+
+### AI mode (automatic initial check)
+
+The API never reads papers itself. The app checks each PDF in the browser when it is picked
+(`src/chair-plagiarism/autoCheck.js`: the rules read pages, editable text, English and layout;
+Claude settles what the rules aren't sure of) and sends the result with the upload: the
+multipart field `autoCheck` (JSON), or `PUT /submissions/{id}/files/{fileId}/auto-check` when the
+check finishes later.
+
+1. **Kept:** the result is checked (`screening/auto-check.ts`: known fields only, valid values;
+   a `decision` sent by the client is ignored) and stored on the version
+   (`submission_files.auto_check`). Under double-blind review "author names missing" is dropped.
+2. **Decided, with AI mode on** (`autoInitialCheck` in the screening settings; a paid feature
+   later, free for every conference now: `PlanService`), by `AutoInitialCheckService` in the same
+   transaction: a certain result that meets every requirement → Passed; one that fails → Revision
+   with the reasons and the correction deadline, emailed to the authors (or left for the chair,
+   per `autoInitialFail`). The stored result's `decision` says what was done.
+3. **Left for the chair:** AI mode off (the chair checks every paper by hand), an unsure result,
+   a failed check (a Word file, an unreadable PDF), or no result at all.
+
+A decision already made is never touched, only the newest version is decided, and turning AI mode
+on decides the papers already waiting. The result comes from the browser, so the chair stays in
+charge: every automatic decision is tagged `autoSet` and can be changed.
+
+## Emails (core/email)
+
+Two ways to send:
+
+- `EmailService.send` sends at once: account emails the user waits for (codes, links).
+- `EmailQueueService.enqueue(tx, event, emails)` takes one email or many and queues them in the
+  transaction of the change they report, so an email exists exactly when the change does. Each
+  email is either a template (`{ template: 'submissionReceived', values, to, conference }`) or a
+  written message (`{ key, label, subject, body, to }`).
+
+How it works:
+
+- **Templates:** the conference's own copy (Conference Settings › Email Templates; turned off =
+  not sent) wins over the platform default (`email_templates`, seeded from the app's email catalog
+  in migration 0004). Account emails always use the platform default.
+- **Queue:** `email_log` is both the queue and the Email Logs chairs read: `queued` → `sending` →
+  `sent`, or back to `queued` for a retry (after 1, 5, 30, 120 minutes) until `EMAIL_MAX_ATTEMPTS`,
+  then `failed` with the reason.
+- **Worker:** `EmailWorker` sends the queue from the API process every `EMAIL_QUEUE_INTERVAL_MS`,
+  in batches (Resend's batch API, 100 per request). Several API instances can run it together
+  (`for update skip locked`). Tests turn it off and call `t.sendQueuedEmails()`.
+- **Recipients:** `EmailRecipientsService` gives the chairs, the super admins, app links, and the
+  one-time "Welcome to Smartconferu" for people added who have no account yet.
 
 ## Database
 

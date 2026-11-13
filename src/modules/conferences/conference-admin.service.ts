@@ -7,6 +7,7 @@ import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import { displayName, toConference } from './conference.mapper.js';
 import { ConferencesRepository } from './conferences.repository.js';
+import { ConferenceEmailsService } from './conference-emails.service.js';
 import type {
   AdminConferenceResponse,
   ConferenceStatus,
@@ -23,6 +24,7 @@ export class ConferenceAdminService {
     private readonly database: DatabaseService,
     private readonly conferences: ConferencesRepository,
     private readonly notifications: NotificationsService,
+    private readonly emails: ConferenceEmailsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -75,6 +77,7 @@ export class ConferenceAdminService {
         body: note ?? conference!.acronym,
         conferenceId,
       });
+      await this.emails.decided(tx, conference!, approve, admin.id);
       await this.audit.record(
         {
           action: approve ? 'conference.approved' : 'conference.declined',
@@ -169,6 +172,14 @@ export class ConferenceAdminService {
         // A deleted conference's notifications shouldn't link back to it.
         conferenceId: approve ? null : request.conferenceId,
       });
+      await this.emails.deletionDecided(
+        tx,
+        conference!,
+        request.requestedBy,
+        approve,
+        note ?? null,
+        admin.id,
+      );
       await this.audit.record(
         {
           action: approve
@@ -213,6 +224,7 @@ export class ConferenceAdminService {
         body: 'The Super Admin brought the conference back. It is archived: restore it from Conference Settings when you want it open again.',
         conferenceId,
       });
+      await this.emails.restored(tx, conference!, asker, admin.id);
       await this.audit.record(
         {
           action: 'conference.undeleted',

@@ -1,5 +1,8 @@
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -24,7 +27,9 @@ export interface TestApp {
   /** Plays Google, Microsoft and ORCID. */
   oidc: FakeOidcProvider;
   /** Emails "sent" so far (EMAIL_TRANSPORT=log). */
-  outbox(): { to: string; subject: string; text: string }[];
+  outbox(): { to: string; subject: string; text: string; html: string }[];
+  /** Sends the email queue now (the background worker is off in tests); emails land in outbox(). */
+  sendQueuedEmails(): Promise<{ sent: number; failed: number }>;
   /** A valid access token for `userId`, as the API would issue it at sign-in. */
   tokenFor(userId: string, mfa?: boolean): Promise<string>;
   /** Creates an account through the app's own repository (verified unless told otherwise). */
@@ -50,6 +55,7 @@ export async function createTestApp(): Promise<TestApp> {
   const server = new PGLiteSocketServer({ db, port, host: '127.0.0.1' });
   await server.start();
 
+  const storageDir = mkdtempSync(join(tmpdir(), 'sc-files-'));
   const oidc = new FakeOidcProvider();
   await oidc.start();
 
@@ -78,6 +84,9 @@ export async function createTestApp(): Promise<TestApp> {
       .toString(),
     TOKEN_HASH_SECRET: randomBytes(32).toString('hex'),
     EMAIL_TRANSPORT: 'log',
+    // Tests send the queue themselves (sendQueuedEmails), so nothing is sent behind their back.
+    EMAIL_QUEUE_ENABLED: 'false',
+    FILE_STORAGE_DIR: storageDir,
     SWAGGER_ENABLED: 'false',
     // Tests send many auth requests from one address; rate limits are not what they test.
     RATE_LIMIT_ENABLED: 'false',
@@ -92,6 +101,8 @@ export async function createTestApp(): Promise<TestApp> {
     await import('../../src/core/auth/password.service.js');
   const { EmailTransport, LogTransport } =
     await import('../../src/core/email/email.transport.js');
+  const { EmailWorker } =
+    await import('../../src/core/email/email-worker.service.js');
   const { AuthRepository } =
     await import('../../src/modules/auth/auth.repository.js');
   const { DatabaseService } =
@@ -118,6 +129,7 @@ export async function createTestApp(): Promise<TestApp> {
     app,
     db,
     outbox: () => transport.outbox,
+    sendQueuedEmails: () => app.get(EmailWorker).drain(),
     oidc,
     tokenFor: (userId, mfa = false) =>
       app.get(AccessTokenService).issue(userId, randomUUID(), mfa),
@@ -139,7 +151,7 @@ export async function createTestApp(): Promise<TestApp> {
     },
     async reset() {
       await db.exec(
-        'delete from conferences; delete from users; delete from audit_log; delete from auth_tokens;',
+        'delete from email_log; delete from conferences; delete from users; delete from audit_log; delete from auth_tokens;',
       );
       transport.outbox.length = 0;
     },
@@ -148,6 +160,7 @@ export async function createTestApp(): Promise<TestApp> {
       await server.stop();
       await oidc.stop();
       await db.close();
+      rmSync(storageDir, { recursive: true, force: true });
     },
   };
 }

@@ -15,6 +15,7 @@ import {
   CHAIR_ROLES,
   type ConferenceAccess,
 } from '../../core/rbac/access.service.js';
+import { ConferenceEmailsService } from './conference-emails.service.js';
 import { toConference, toPublicConference } from './conference.mapper.js';
 import {
   type ConferenceInsert,
@@ -52,6 +53,7 @@ export class ConferencesService {
     private readonly conferences: ConferencesRepository,
     private readonly access: AccessService,
     private readonly notifications: NotificationsService,
+    private readonly emails: ConferenceEmailsService,
     private readonly audit: AuditService,
   ) {}
 
@@ -89,6 +91,7 @@ export class ConferencesService {
         body: `${conference.acronym} — ${conference.title}`,
         conferenceId: conference.id,
       });
+      await this.emails.requested(tx, conference, user.id);
       await this.audit.record(
         {
           action: 'conference.requested',

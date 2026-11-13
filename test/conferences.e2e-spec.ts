@@ -608,4 +608,63 @@ describe('Conferences, CFP and team', () => {
       await as(reviewer.token).get(`/conferences/${id}`).expect(404);
     });
   });
+  describe('emails', () => {
+    const emailsTo = async (email: string) =>
+      (
+        await t.db.query<{ template_key: string; status: string }>(
+          'select template_key, status from email_log where lower(to_email) = lower($1) order by created_at, template_key',
+          [email],
+        )
+      ).rows.map((r) => r.template_key);
+
+    it('emails the super admins a request and the chair the decision', async () => {
+      const chair = await person({ firstName: 'Chair', lastName: 'Person' });
+      const admin = await superAdmin();
+      const created = await as(chair.token)
+        .post('/conferences', request_)
+        .expect(201);
+      expect(await emailsTo(admin.email)).toEqual(['conferenceRequestAdmin']);
+      await as(admin.token)
+        .post(`/admin/conferences/${created.body.id}/decision`, {
+          approve: true,
+        })
+        .expect(204);
+      expect(await emailsTo(chair.email)).toEqual(['conferenceApproved']);
+      await expect(t.sendQueuedEmails()).resolves.toMatchObject({ failed: 0 });
+      expect(t.outbox().map((m) => m.subject)).toEqual(
+        expect.arrayContaining([
+          'New conference request: ISBM 2027',
+          'ISBM 2027 is approved',
+        ]),
+      );
+    });
+
+    it('emails an invited reviewer (welcoming a newcomer) and the chairs when they join', async () => {
+      const chair = await person({ firstName: 'Chair', lastName: 'Person' });
+      const id = await liveConference(chair);
+      await as(chair.token)
+        .post(`/conferences/${id}/members`, { email: 'new@reviewer.example' })
+        .expect(201);
+      expect(await emailsTo('new@reviewer.example')).toEqual([
+        'reviewerInvited',
+        'welcome',
+      ]);
+
+      const reviewer = await person({ firstName: 'Rae', lastName: 'Viewer' });
+      await as(chair.token)
+        .post(`/conferences/${id}/members`, { email: reviewer.email })
+        .expect(201);
+      expect(await emailsTo(reviewer.email)).toEqual(['reviewerInvited']);
+      const [invitation] = (
+        await as(reviewer.token).get('/invitations').expect(200)
+      ).body;
+      await as(reviewer.token)
+        .post(`/invitations/${invitation.id}/accept`)
+        .expect(200);
+      expect(await emailsTo(chair.email)).toContain('teamMemberJoined');
+      await t.sendQueuedEmails();
+      const toReviewer = t.outbox().find((m) => m.to === reviewer.email);
+      expect(toReviewer?.subject).toMatch(/ISBM 2027/);
+    });
+  });
 });
