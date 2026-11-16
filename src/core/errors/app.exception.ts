@@ -27,6 +27,8 @@ export const ErrorCode = {
   BUSINESS_RULE: 'BUSINESS_RULE',
   RATE_LIMITED: 'RATE_LIMITED',
   NOT_READY: 'NOT_READY',
+  /** An AI provider failed or declined; the message says what to do. */
+  AI_FAILED: 'AI_FAILED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

@@ -22,6 +22,11 @@ import { RbacModule } from './core/rbac/rbac.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ConferencesModule } from './modules/conferences/conferences.module.js';
+import { AiModule } from './modules/ai/ai.module.js';
+import { CommunicationsModule } from './modules/communications/communications.module.js';
+import { JobsModule } from './modules/jobs/jobs.module.js';
+import { BellModule } from './modules/notifications/notifications.module.js';
+import { ReviewsModule } from './modules/reviews/reviews.module.js';
 import { SubmissionsModule } from './modules/submissions/submissions.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
@@ -95,6 +100,11 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
     UsersModule,
     ConferencesModule,
     SubmissionsModule,
+    ReviewsModule,
+    CommunicationsModule,
+    BellModule,
+    JobsModule,
+    AiModule,
     AdminModule,
   ],
   controllers: [HealthController],

@@ -9,9 +9,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import type { Env } from '../../config/env.js';
 import { DatabaseService } from './database.service.js';
-import { DRIZZLE, schema } from './database.types.js';
-
-const PG_CLIENT = Symbol('PG_CLIENT');
+import { DRIZZLE, PG_CLIENT, schema } from './database.types.js';
 
 @Global()
 @Module({
@@ -32,7 +30,7 @@ const PG_CLIENT = Symbol('PG_CLIENT');
     },
     DatabaseService,
   ],
-  exports: [DatabaseService],
+  exports: [DatabaseService, PG_CLIENT],
 })
 export class DatabaseModule implements OnApplicationShutdown {
   constructor(@Inject(PG_CLIENT) private readonly client: postgres.Sql) {}

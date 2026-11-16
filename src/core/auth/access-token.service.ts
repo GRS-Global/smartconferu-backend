@@ -10,6 +10,9 @@ export const TOKEN_ISSUER = 'smartconferu-api';
 export const TOKEN_AUDIENCE = 'smartconferu';
 const MFA_CHALLENGE_AUDIENCE = 'smartconferu-mfa';
 export const MFA_CHALLENGE_TTL_SECONDS = 300;
+const EVENT_TICKET_AUDIENCE = 'smartconferu-events';
+/** A live-events ticket only opens the stream; it is used at once. */
+export const EVENT_TICKET_TTL_SECONDS = 60;
 
 /**
  * Short-lived access tokens: Ed25519-signed JWTs carrying the user id (`sub`) and session
@@ -94,6 +97,40 @@ export class AccessTokenService {
     return {
       userId: payload.sub,
       method: typeof payload.method === 'string' ? payload.method : 'unknown',
+    };
+  }
+
+  /**
+   * A short-lived ticket that opens the live-event stream (GET /me/events): the browser's
+   * EventSource can't send an Authorization header, so the app asks for one with its access token
+   * and puts it in the stream's URL. A different audience: it is never an access token.
+   */
+  issueEventTicket(user: AuthUser): Promise<string> {
+    return new SignJWT({ sid: user.sessionId, mfa: user.mfa })
+      .setProtectedHeader({ alg: 'EdDSA', kid: this.keyId, typ: 'JWT' })
+      .setSubject(user.id)
+      .setIssuer(TOKEN_ISSUER)
+      .setAudience(EVENT_TICKET_AUDIENCE)
+      .setIssuedAt()
+      .setExpirationTime(`${EVENT_TICKET_TTL_SECONDS}s`)
+      .setJti(randomUUID())
+      .sign(this.privateKey);
+  }
+
+  /** The user a live-events ticket was issued to; rejects if invalid or expired. */
+  async verifyEventTicket(ticket: string): Promise<AuthUser> {
+    const { payload } = await jwtVerify(ticket, this.publicKey, {
+      issuer: TOKEN_ISSUER,
+      audience: EVENT_TICKET_AUDIENCE,
+      algorithms: ['EdDSA'],
+    });
+    if (typeof payload.sub !== 'string' || typeof payload.sid !== 'string') {
+      throw new Error('Ticket is missing sub or sid');
+    }
+    return {
+      id: payload.sub,
+      sessionId: payload.sid,
+      mfa: payload.mfa === true,
     };
   }
 

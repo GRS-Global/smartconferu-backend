@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, inArray } from 'drizzle-orm';
+import { DatabaseService } from '../database/database.service.js';
 import type { Executor } from '../database/database.types.js';
+import { LiveEventsService } from '../realtime/live-events.service.js';
 import {
   conferenceMembers,
   notifications,
@@ -19,10 +21,16 @@ export interface NewNotification {
 /**
  * Writes in-app notifications (the bell). Always called inside the transaction of the change it
  * reports, so a notification exists exactly when the change does. Replaces the old notify_*
- * database triggers.
+ * database triggers. Once the change is saved, each one is pushed to its user's open live-event
+ * streams (LiveEventsService), so the bell updates at once.
  */
 @Injectable()
 export class NotificationsService {
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly live: LiveEventsService,
+  ) {}
+
   async notify(
     executor: Executor,
     userIds: readonly string[],
@@ -32,16 +40,22 @@ export class NotificationsService {
     if (unique.length === 0) {
       return;
     }
-    await executor.insert(notifications).values(
-      unique.map((userId) => ({
-        userId,
-        kind: notification.kind,
-        title: notification.title,
-        body: notification.body ?? null,
-        conferenceId: notification.conferenceId ?? null,
-        submissionId: notification.submissionId ?? null,
-        link: notification.link ?? null,
-      })),
+    const rows = await executor
+      .insert(notifications)
+      .values(
+        unique.map((userId) => ({
+          userId,
+          kind: notification.kind,
+          title: notification.title,
+          body: notification.body ?? null,
+          conferenceId: notification.conferenceId ?? null,
+          submissionId: notification.submissionId ?? null,
+          link: notification.link ?? null,
+        })),
+      )
+      .returning({ id: notifications.id });
+    this.database.afterCommit(executor, () =>
+      this.live.publish(rows.map((r) => r.id)),
     );
   }
 

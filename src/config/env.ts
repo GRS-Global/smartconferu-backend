@@ -101,6 +101,27 @@ const envSchema = z.object({
   /** Tries before an email is marked failed. */
   EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
 
+  /** Claude, for the AI features. Without it they answer 503. */
+  ANTHROPIC_API_KEY: z.string().optional(),
+  /** Only when the key is not scoped to one workspace. */
+  ANTHROPIC_WORKSPACE_ID: z.string().optional(),
+  /** Voyage AI embeddings, for paper chat (voyageai.com, pa-…). */
+  VOYAGE_API_KEY: z.string().optional(),
+  VOYAGE_BASE_URL: z.url().default('https://api.voyageai.com'),
+  /** Prepare each new paper version for AI (text, embeddings, digest) right after upload. */
+  AI_AUTO_INGEST: bool.default(true),
+
+  /**
+   * Share live events (new notifications) between API instances through Postgres LISTEN/NOTIFY.
+   * Off only where one instance runs (tests); without it each instance pushes only its own events.
+   */
+  REALTIME_FANOUT: bool.default(true),
+
+  /** Run the background jobs (review reminders, cleanup) from this process (off in tests). */
+  JOBS_ENABLED: bool.default(true),
+  /** How often the jobs run; each job decides itself what is due (reminders go out once a day). */
+  JOBS_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
+
   /** Where uploaded files (papers, reports) are kept. `local`: a folder on this machine (development). */
   FILE_STORAGE_DRIVER: z.enum(['local']).default('local'),
   /** The folder for FILE_STORAGE_DRIVER=local. */

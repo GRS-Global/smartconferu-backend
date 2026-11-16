@@ -98,6 +98,14 @@ export class SubmissionEmailsService {
     return { updates, coAuthors, submitterEmail };
   }
 
+  /** Who hears about a paper's updates: the submitter and every corresponding author, once each. */
+  async authorUpdates(
+    executor: Executor,
+    ctx: PaperContext,
+  ): Promise<{ email: string; name: string }[]> {
+    return (await this.authorRecipients(executor, ctx)).updates;
+  }
+
   private common(ctx: PaperContext) {
     const details = ctx.submission.details as Record<string, unknown>;
     return {

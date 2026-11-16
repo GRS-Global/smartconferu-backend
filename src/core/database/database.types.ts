@@ -11,3 +11,6 @@ export type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
 export type Executor = Database | Tx;
 
 export const DRIZZLE = Symbol('DRIZZLE');
+
+/** The postgres.js client itself, for what Drizzle doesn't do (LISTEN / NOTIFY). */
+export const PG_CLIENT = Symbol('PG_CLIENT');

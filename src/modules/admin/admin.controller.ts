@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -7,6 +7,15 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { SuperAdminOnly } from '../../core/rbac/super-admin.guard.js';
+import { AdminService } from './admin.service.js';
+import {
+  ActivityPage,
+  ActivityQuery,
+  AdminPaperResponse,
+  AdminStatsResponse,
+  AdminUserPage,
+  UsersQuery,
+} from './dto/admin.dto.js';
 
 class AdminAccessResponse {
   @ApiProperty({ example: true })
@@ -19,6 +28,8 @@ class AdminAccessResponse {
 @SuperAdminOnly()
 @Controller('admin')
 export class AdminController {
+  constructor(private readonly admin: AdminService) {}
+
   @Get('access')
   @ApiOperation({
     summary:
@@ -27,5 +38,37 @@ export class AdminController {
   @ApiOkResponse({ type: AdminAccessResponse })
   access(): AdminAccessResponse {
     return { superAdmin: true };
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Platform numbers for the dashboard' })
+  @ApiOkResponse({ type: AdminStatsResponse })
+  stats(): Promise<AdminStatsResponse> {
+    return this.admin.stats();
+  }
+
+  @Get('users')
+  @ApiOperation({ summary: 'Everyone with an account, newest first' })
+  @ApiOkResponse({ type: AdminUserPage })
+  users(@Query() query: UsersQuery): Promise<AdminUserPage> {
+    return this.admin.users(query);
+  }
+
+  @Get('activity')
+  @ApiOperation({ summary: 'What happened on the platform, newest first' })
+  @ApiOkResponse({ type: ActivityPage })
+  activity(@Query() query: ActivityQuery): Promise<ActivityPage> {
+    return this.admin.activity(query);
+  }
+
+  @Get('conferences/:conferenceId/papers')
+  @ApiOperation({
+    summary: "A conference's papers with their review stage and reviewers",
+  })
+  @ApiOkResponse({ type: [AdminPaperResponse] })
+  papers(
+    @Param('conferenceId', ParseUUIDPipe) conferenceId: string,
+  ): Promise<AdminPaperResponse[]> {
+    return this.admin.conferencePapers(conferenceId);
   }
 }

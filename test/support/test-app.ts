@@ -30,6 +30,10 @@ export interface TestApp {
   outbox(): { to: string; subject: string; text: string; html: string }[];
   /** Sends the email queue now (the background worker is off in tests); emails land in outbox(). */
   sendQueuedEmails(): Promise<{ sent: number; failed: number }>;
+  /** Runs the background jobs now (they are off in tests), as of `now`. */
+  runJobs(
+    now?: Date,
+  ): Promise<import('../../src/modules/jobs/jobs.runner.js').JobsResult>;
   /** A valid access token for `userId`, as the API would issue it at sign-in. */
   tokenFor(userId: string, mfa?: boolean): Promise<string>;
   /** Creates an account through the app's own repository (verified unless told otherwise). */
@@ -49,7 +53,10 @@ export interface TestApp {
  * The real app (same module graph, same setupApp) against a fresh local Postgres with every
  * migration applied, reached through the production driver (postgres.js) over a socket.
  */
-export async function createTestApp(): Promise<TestApp> {
+export async function createTestApp(
+  /** Settings that differ from the test defaults (e.g. AI keys pointing at a fake server). */
+  overrides: Record<string, string> = {},
+): Promise<TestApp> {
   const db = await createLocalDb();
   const port = await freePort();
   const server = new PGLiteSocketServer({ db, port, host: '127.0.0.1' });
@@ -86,10 +93,19 @@ export async function createTestApp(): Promise<TestApp> {
     EMAIL_TRANSPORT: 'log',
     // Tests send the queue themselves (sendQueuedEmails), so nothing is sent behind their back.
     EMAIL_QUEUE_ENABLED: 'false',
+    // Tests run the jobs themselves (runJobs).
+    JOBS_ENABLED: 'false',
+    // No AI keys: the AI tests point them at a fake server themselves.
+    ANTHROPIC_API_KEY: '',
+    VOYAGE_API_KEY: '',
+    AI_AUTO_INGEST: 'false',
+    // PGlite's socket server doesn't relay LISTEN/NOTIFY (fan-out is unit tested).
+    REALTIME_FANOUT: 'false',
     FILE_STORAGE_DIR: storageDir,
     SWAGGER_ENABLED: 'false',
     // Tests send many auth requests from one address; rate limits are not what they test.
     RATE_LIMIT_ENABLED: 'false',
+    ...overrides,
   });
 
   // Imported only now: ConfigModule reads and validates process.env when app.module loads.
@@ -103,6 +119,7 @@ export async function createTestApp(): Promise<TestApp> {
     await import('../../src/core/email/email.transport.js');
   const { EmailWorker } =
     await import('../../src/core/email/email-worker.service.js');
+  const { JobsRunner } = await import('../../src/modules/jobs/jobs.runner.js');
   const { AuthRepository } =
     await import('../../src/modules/auth/auth.repository.js');
   const { DatabaseService } =
@@ -130,6 +147,7 @@ export async function createTestApp(): Promise<TestApp> {
     db,
     outbox: () => transport.outbox,
     sendQueuedEmails: () => app.get(EmailWorker).drain(),
+    runJobs: (now) => app.get(JobsRunner).runAll(now),
     oidc,
     tokenFor: (userId, mfa = false) =>
       app.get(AccessTokenService).issue(userId, randomUUID(), mfa),

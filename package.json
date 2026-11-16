@@ -27,6 +27,7 @@
     "secrets:generate": "node scripts/generate-secrets.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@nestjs/common": "^12.0.1",
     "@nestjs/config": "^12.0.1",
     "@nestjs/core": "^12.0.1",
@@ -43,6 +44,7 @@
     "jose": "^6.2.15",
     "nestjs-pino": "^5.3.1",
     "otpauth": "^9.6.0",
+    "pdfjs-dist": "^6.3.289",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
     "postgres": "^4.0.0",

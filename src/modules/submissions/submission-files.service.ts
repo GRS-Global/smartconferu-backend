@@ -2,6 +2,7 @@ import { extname } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.js';
+import { PaperRagService } from '../ai/paper-rag.service.js';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
@@ -84,6 +85,7 @@ export class SubmissionFilesService {
     private readonly notifications: NotificationsService,
     private readonly recipients: EmailRecipientsService,
     private readonly audit: AuditService,
+    private readonly rag: PaperRagService,
     config: ConfigService<Env, true>,
   ) {
     this.maxBytes = config.get('MAX_UPLOAD_MB', { infer: true }) * 1024 * 1024;
@@ -132,7 +134,7 @@ export class SubmissionFilesService {
 
     let storedKey: string | undefined;
     try {
-      return await this.database.transaction(async (tx) => {
+      const result = await this.database.transaction(async (tx) => {
         const submission = await this.submissions.findForUpdate(
           tx,
           submissionId,
@@ -238,6 +240,11 @@ export class SubmissionFilesService {
           autoCheck: stored ? { ...stored } : null,
         };
       });
+      // A new PDF version of the paper is prepared for the AI features (in the background).
+      if (!supplementary && TYPES[type].mime === 'application/pdf') {
+        this.rag.ingestLater(submissionId);
+      }
+      return result;
     } catch (error) {
       // The upload didn't happen: don't leave its file behind.
       if (storedKey)

@@ -55,6 +55,7 @@ api/
 │  │  ├─ http/             client IP / user agent, rate limiter
 │  │  ├─ health/           /health (process up), /health/ready (database reachable)
 │  │  ├─ notifications/    in-app notifications (the bell), written with each change
+│  │  ├─ realtime/         LiveEventsService: pushes new notifications to open SSE streams
 │  │  ├─ storage/          FileStorage: uploaded files (local folder; S3-compatible later)
 │  │  ├─ plan/             PlanService: which paid features a conference has (all free now)
 │  │  └─ validation/       shared input validators
@@ -63,7 +64,12 @@ api/
 │  │  ├─ users/            /me: my profile, Terms acceptance, my conferences
 │  │  ├─ conferences/      conferences, Call for Papers, team and invitations
 │  │  ├─ submissions/      papers: submit, lists, paper page, edit, withdraw, screening
-│  │  └─ admin/            super-admin endpoints
+│  │  ├─ reviews/          assignments, review form, chair reviews, sending decisions, reminders
+│  │  ├─ communications/   email templates, Email Logs, the chair's own emails
+│  │  ├─ notifications/    the bell (/me/notifications) and live events (/me/events, SSE)
+│  │  ├─ ai/               Claude helpers, paper RAG (pgvector) and chat, fill from website
+│  │  ├─ jobs/             background jobs: review reminders, cleanup, AI backlog
+│  │  └─ admin/            super-admin console: stats, users, activity, review health
 │  └─ types/express.d.ts   adds request.user
 ├─ drizzle/                SQL migrations generated from the schema (0000, 0001, …)
 ├─ test/                   API (e2e) tests + helpers (test app, fake Google/Microsoft/ORCID)
@@ -237,7 +243,7 @@ How it works:
 
 ### AI mode (automatic initial check)
 
-The API never reads papers itself. The app checks each PDF in the browser when it is picked
+The initial check doesn't read papers on the server. The app checks each PDF in the browser when it is picked
 (`src/chair-plagiarism/autoCheck.js`: the rules read pages, editable text, English and layout;
 Claude settles what the rules aren't sure of) and sends the result with the upload: the
 multipart field `autoCheck` (JSON), or `PUT /submissions/{id}/files/{fileId}/auto-check` when the
@@ -281,6 +287,81 @@ How it works:
   (`for update skip locked`). Tests turn it off and call `t.sendQueuedEmails()`.
 - **Recipients:** `EmailRecipientsService` gives the chairs, the super admins, app links, and the
   one-time "Welcome to Smartconferu" for people added who have no account yet.
+
+## Peer review and decisions (modules/reviews)
+
+- **Assigning** (`POST /submissions/{id}/assignments`, chairs): committee members by member id.
+  Active reviewers get the paper now ("Papers assigned to you" + bell); invited ones get a waiting
+  row that becomes an assignment when they accept the committee invitation. Authors of the paper
+  can't be given it. Someone who declined or was taken off gets it again.
+- **Reviewers** answer each paper (`POST /assignments/{id}/respond`) and save their form
+  (`PUT /assignments/{id}/review`, `submit: false` = draft). The first send marks the assignment
+  done and emails thanks, "New review" and, once all are in, "Ready for decision". A sent review can
+  be corrected until the paper has a decision; a draft save never takes it back.
+- **Chairs** see every assignment (`GET /submissions/{id}/reviews`), correct a sent review
+  (`PUT /reviews/{id}`, the reviewer is told), write their own (`PUT …/chair-review`), share a
+  review with the authors (`PATCH /reviews/{id}/shared`) and take a paper back
+  (`DELETE /assignments/{id}`: a sent review stays on record but no longer counts).
+- **Decisions:** recorded with `POST /submissions/{id}/decision` (authors see nothing yet), sent
+  with `POST …/decision/notify`: the authors' email and bell (shared reviews, anonymised), the final
+  decision to the reviewers, "Decision changed" when it differs from what was sent before.
+  `PUT /conferences/{id}/decision-types` replaces the list; a type a paper uses can't be removed.
+- **Reminders:** the jobs runner sends "N days left" and "Last day" per the conference's review
+  timeline (`settings.reviewTimeline`), once per reviewer per day (`reminders/`).
+
+## Notifications and live events (core/notifications, core/realtime, modules/notifications)
+
+- `NotificationsService.notify(tx, userIds, …)` saves bell notifications in the change's
+  transaction. Once it commits (`DatabaseService.afterCommit`), `LiveEventsService` pushes them.
+- `GET /me/notifications` (paged) and `POST /me/notifications/read` read the bell.
+- **Live events (Server-Sent Events):** the app gets a one-minute ticket
+  (`POST /me/events/ticket`, with its access token) and opens
+  `new EventSource(API + '/me/events?ticket=' + ticket)`. Events: `ready` ({ unread }), then
+  `notification` ({ notification, unread }) with an id. After a drop, or `expired` (streams end
+  after an hour, or when a sixth tab opens for the same user), get a new ticket and reopen with
+  `&lastEventId=<last id>`: missed notifications come first. A heartbeat comment every 25 s keeps
+  proxies from closing the stream.
+- **Several API instances:** with `REALTIME_FANOUT` (default on) the ids also go out on Postgres
+  `NOTIFY sc_live_events`, and every instance pushes to its own streams, so no sticky sessions or
+  Redis are needed. PGlite doesn't relay NOTIFY over its socket, so tests turn it off and the
+  fan-out is unit tested.
+- Paging uses `keyset()` (core/http/pagination.ts): times are compared to the millisecond, so
+  rows saved in one transaction are never skipped at a page edge.
+
+## Email templates and Email Logs (modules/communications)
+
+- `GET/PUT/DELETE /conferences/{id}/email-templates[/{key}]`: the conference's copy of each email
+  (on/off, subject, body; DELETE puts it back to the default) and its custom emails
+  (`custom:<id>` keys). Account emails stay the platform's.
+- `GET /conferences/{id}/email-log`: Email Logs, newest first, paged (`?limit&cursor`), filtered by
+  status, paper or template.
+- `POST /conferences/{id}/emails`: the chair's own email to author groups and/or reviewers; each
+  person once, with their name and paper filled in (at most 2000 people).
+- Super admins: `/admin/email-templates` (change a default: copies nobody changed follow it;
+  `…/test` sends one with example values) and `/admin/email-log`.
+
+## AI (modules/ai)
+
+Claude through the official SDK (`ANTHROPIC_API_KEY`), Voyage AI embeddings for paper chat
+(`VOYAGE_API_KEY`). Without keys the routes answer 503 `NOT_READY`; a provider failure is 502
+`AI_FAILED`, a declined request 422. Every call writes an `ai_usage` row with its cost.
+
+- `POST /ai/paper-metadata` (Smart Fill), `/ai/screening` (the initial check's AI part, from the
+  app's digest of the PDF), `/ai/topics`, `/ai/review-enhance` (three wordings of the reviewer's
+  own review), `/ai/conference-from-website` (reads public http(s) sites only; private addresses
+  are refused, also through DNS and redirects).
+- **Paper RAG:** each new PDF version is prepared in the background (`AI_AUTO_INGEST`): pdf.js
+  text → section chunks → embeddings in `paper_chunks` (pgvector) → a Haiku digest in
+  `paper_digests`. The jobs runner prepares any paper missed. `POST /submissions/{id}/ai/chat`
+  (chairs and assigned reviewers) answers from the digest and the 5 closest chunks.
+- Tests point `ANTHROPIC_BASE_URL` / `VOYAGE_BASE_URL` at a fake server (`test/support/fake-ai.ts`).
+
+## Background jobs (modules/jobs)
+
+`JobsRunner` runs every `JOBS_INTERVAL_MS` (and 30 s after start): review reminders, deleting
+sign-in links and sessions expired over a week ago (each in a transaction under an advisory
+lock, so only one instance runs it), and the AI backlog. Tests turn it off and call
+`t.runJobs(now)`.
 
 ## Database
 
