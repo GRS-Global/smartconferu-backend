@@ -38,7 +38,7 @@ PostgreSQL  (locally: PGlite on :54329 · production: AWS RDS)
 ## Project structure
 
 ```
-api/
+smartconferu-backend/
 ├─ src/
 │  ├─ main.ts              starts the server
 │  ├─ app.module.ts        root module: imports every module, global guards, error filter
@@ -379,7 +379,7 @@ lock, so only one instance runs it), and the AI backlog. Tests turn it off and c
 Requires Node 22.18+. No Docker needed.
 
 ```bash
-cd api
+cd smartconferu-backend
 npm install
 cp .env.example .env
 npm run secrets:generate     # paste the output into .env
@@ -418,7 +418,7 @@ after `token=`.
 
 | Symptom                                | Cause and fix                                                         |
 | -------------------------------------- | --------------------------------------------------------------------- |
-| 503 `NOT_READY` on every request       | The database isn't running: start `npm run db:serve` (inside `api/`)  |
+| 503 `NOT_READY` on every request       | The database isn't running: start `npm run db:serve`                  |
 | `EADDRINUSE` on 54329 or 3000          | Already running in another terminal: use it, or close it first        |
 | 500 `INTERNAL_ERROR`                   | Find the `requestId` in the `start:dev` terminal for the real error   |
 | App won't start, "Invalid environment" | A setting in `.env` is missing or wrong; compare with `.env.example`  |
@@ -445,5 +445,5 @@ npm run db:check     # migrations are consistent
 npm run build
 ```
 
-CI (`.github/workflows/api-ci.yml`) runs all of these on every pull request that touches `api/`,
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request and every push to `main`,
 and fails if the schema changed without a migration.

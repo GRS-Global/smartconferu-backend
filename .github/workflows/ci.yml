@@ -1,0 +1,43 @@
+name: API CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run test:e2e
+      - name: Migrations match the schema
+        run: |
+          npm run db:check
+          npx drizzle-kit generate
+          test -z "$(git status --porcelain drizzle)" || { echo "Schema changed without a migration: run npm run db:generate"; exit 1; }
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t smartconferu-api:${{ github.sha }} .

@@ -1,4 +1,4 @@
-# Production image for the API (AWS ECS). Build from the api/ folder:
+# Production image for the API. Build from the repo root:
 #   docker build -t smartconferu-api .
 # The same image runs migrations before a deploy:  node dist/migrate.js
 FROM node:22-alpine AS build
