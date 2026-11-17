@@ -160,7 +160,7 @@ export class AuthController {
   @ApiCookieAuth(MFA_COOKIE)
   @ApiOperation({
     summary:
-      'Second step of a sign-in: a code from the authenticator app, or a recovery code',
+      'Second step of a sign-in: a code from the authenticator app, a recovery code, or the emailed code',
   })
   @ApiOkResponse({ type: SessionResponse })
   async verifyMfa(
@@ -177,6 +177,19 @@ export class AuthController {
     );
     this.cookies.clear(res, MFA_COOKIE);
     return this.withSession(res, session);
+  }
+
+  @Public()
+  @Post('mfa/email-code')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth(MFA_COOKIE)
+  @ApiOperation({
+    summary:
+      'Email a new code for a pending sign-in whose second step is an emailed code (factor: email)',
+  })
+  async resendMfaEmailCode(@Req() req: Request): Promise<void> {
+    this.cookies.assertAllowedOrigin(req);
+    await this.auth.resendMfaEmailCode(this.cookies.read(req, MFA_COOKIE));
   }
 
   @Public()
@@ -287,7 +300,11 @@ export class AuthController {
       this.cookies.setMfaChallenge(res, outcome.challenge);
       return {
         mfaRequired: true,
-        message: 'Enter the code from your authenticator app.',
+        factor: outcome.factor,
+        message:
+          outcome.factor === 'email'
+            ? 'We emailed you a 6-digit code. Enter it to finish signing in.'
+            : 'Enter the code from your authenticator app.',
       };
     }
     return this.withSession(res, outcome.session);

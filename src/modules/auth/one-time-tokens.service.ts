@@ -15,7 +15,7 @@ import type { Executor } from '../../core/database/database.types.js';
 import { authTokens } from '../../core/database/schema/index.js';
 
 export type LinkPurpose = 'verify_email' | 'reset_password' | 'change_email';
-export type CodePurpose = 'login_code' | 'merge_account';
+export type CodePurpose = 'login_code' | 'merge_account' | 'mfa_email_code';
 
 /** Wrong guesses allowed per code before it stops working. */
 const MAX_CODE_ATTEMPTS = 5;
@@ -89,6 +89,7 @@ export class OneTimeTokensService {
     email: string,
     userId: string | null,
     ttlMinutes: number,
+    executor: Executor = this.database.db,
   ): Promise<string> {
     // A code can repeat an earlier one for the same email (1 in a million), which the unique
     // hash index refuses; just draw again.
@@ -96,7 +97,7 @@ export class OneTimeTokensService {
       const code = randomCode();
       try {
         await this.store(
-          this.database.db,
+          executor,
           purpose,
           email,
           userId,

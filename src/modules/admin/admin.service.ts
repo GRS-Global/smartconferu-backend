@@ -1,5 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, ilike, inArray, lt, or, sql } from 'drizzle-orm';
+import { HttpStatus, Injectable } from '@nestjs/common';
+import { AuditService } from '../../core/audit/audit.service.js';
+import type { AuthUser } from '../../core/auth/auth-user.js';
+import type { ClientInfo } from '../../core/http/client-info.js';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { DatabaseService } from '../../core/database/database.service.js';
 import {
   auditLog,
@@ -11,19 +25,22 @@ import {
   profiles,
   reviewAssignments,
   reviews,
+  sessions,
   submissionAuthors,
   submissions,
   userMfa,
   users,
 } from '../../core/database/schema/index.js';
-import { AppException } from '../../core/errors/app.exception.js';
+import { AppException, ErrorCode } from '../../core/errors/app.exception.js';
 import { decodeCursor, keyset, page } from '../../core/http/pagination.js';
 import { paperId, STAGE_OUTCOMES } from '../submissions/submission.mapper.js';
 import type {
   ActivityPage,
   AdminPaperResponse,
   AdminStatsResponse,
+  AdminUserDetailResponse,
   AdminUserPage,
+  AdminUserResponse,
   ActivityQuery,
   UsersQuery,
 } from './dto/admin.dto.js';
@@ -89,7 +106,10 @@ export function paperStage(
  */
 @Injectable()
 export class AdminService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly audit: AuditService,
+  ) {}
 
   async stats(): Promise<AdminStatsResponse> {
     const db = this.database.db;
@@ -228,6 +248,197 @@ export class AdminService {
     };
   }
 
+  /** One account: what the users list shows, plus their conferences and recent activity. */
+  async user(id: string): Promise<AdminUserDetailResponse> {
+    const summary = await this.userSummary(id);
+    const db = this.database.db;
+    const memberships = await db
+      .select({
+        id: conferences.id,
+        slug: conferences.slug,
+        acronym: conferences.acronym,
+        title: conferences.title,
+        status: conferences.status,
+        role: conferenceMembers.role,
+      })
+      .from(conferenceMembers)
+      .innerJoin(
+        conferences,
+        eq(conferences.id, conferenceMembers.conferenceId),
+      )
+      .where(
+        and(
+          eq(conferenceMembers.userId, id),
+          eq(conferenceMembers.status, 'active'),
+        ),
+      )
+      .orderBy(asc(conferences.acronym));
+    const authored = await db
+      .select({
+        id: conferences.id,
+        slug: conferences.slug,
+        acronym: conferences.acronym,
+        title: conferences.title,
+        status: conferences.status,
+        papers: sql<number>`count(distinct ${submissions.id})::int`,
+      })
+      .from(submissions)
+      .innerJoin(conferences, eq(conferences.id, submissions.conferenceId))
+      .leftJoin(
+        submissionAuthors,
+        eq(submissionAuthors.submissionId, submissions.id),
+      )
+      .where(
+        or(eq(submissions.submitterId, id), eq(submissionAuthors.userId, id)),
+      )
+      .groupBy(conferences.id)
+      .orderBy(asc(conferences.acronym));
+    const byConference = new Map<
+      string,
+      AdminUserDetailResponse['conferences'][number]
+    >();
+    const entry = (c: {
+      id: string;
+      slug: string;
+      acronym: string;
+      title: string;
+      status: string;
+    }) => {
+      let e = byConference.get(c.id);
+      if (!e) {
+        e = {
+          id: c.id,
+          slug: c.slug,
+          acronym: c.acronym,
+          title: c.title,
+          status: c.status,
+          roles: [],
+          papers: 0,
+        };
+        byConference.set(c.id, e);
+      }
+      return e;
+    };
+    for (const m of memberships) {
+      const role = m.role === 'track_chair' ? 'chair' : m.role;
+      const e = entry(m);
+      if (!e.roles.includes(role)) e.roles.push(role);
+    }
+    for (const a of authored) {
+      const e = entry(a);
+      e.roles.push('author');
+      e.papers = a.papers;
+    }
+    const activity = await this.activity({ actorId: id, limit: 20 });
+    return Object.assign({}, summary, {
+      conferences: [...byConference.values()],
+      recentActivity: activity.data,
+    });
+  }
+
+  /**
+   * Suspends (status disabled: every session ends, signing in is refused) or reactivates an
+   * account. A super admin can't suspend themself or another super admin.
+   */
+  async setUserStatus(
+    admin: AuthUser,
+    id: string,
+    status: 'active' | 'disabled',
+    reason: string | undefined,
+    client: ClientInfo,
+  ): Promise<AdminUserResponse> {
+    await this.database.transaction(async (tx) => {
+      const [target] = await tx
+        .select({
+          id: users.id,
+          status: users.status,
+          isSuperAdmin: users.isSuperAdmin,
+        })
+        .from(users)
+        .where(eq(users.id, id))
+        .for('update');
+      if (!target) {
+        throw AppException.notFound('User');
+      }
+      if (
+        status === 'disabled' &&
+        (target.id === admin.id || target.isSuperAdmin)
+      ) {
+        throw new AppException(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          ErrorCode.BUSINESS_RULE,
+          target.id === admin.id
+            ? "You can't suspend your own account."
+            : "A super admin's account can't be suspended here.",
+        );
+      }
+      if (target.status === status) {
+        return;
+      }
+      await tx.update(users).set({ status }).where(eq(users.id, id));
+      if (status === 'disabled') {
+        await tx
+          .update(sessions)
+          .set({ revokedAt: new Date(), revokedReason: 'suspended' })
+          .where(and(eq(sessions.userId, id), isNull(sessions.revokedAt)));
+      }
+      await this.audit.record(
+        {
+          action:
+            status === 'disabled'
+              ? 'admin.user_suspended'
+              : 'admin.user_reactivated',
+          actorId: admin.id,
+          entityType: 'user',
+          entityId: id,
+          client,
+          data: reason ? { reason } : {},
+        },
+        tx,
+      );
+    });
+    return this.userSummary(id);
+  }
+
+  private async userSummary(id: string): Promise<AdminUserResponse> {
+    const [u] = await this.database.db
+      .select({
+        id: users.id,
+        email: users.email,
+        status: users.status,
+        isSuperAdmin: users.isSuperAdmin,
+        createdAt: users.createdAt,
+        lastSignInAt: users.lastSignInAt,
+        emailVerifiedAt: users.emailVerifiedAt,
+        firstName: profiles.firstName,
+        lastName: profiles.lastName,
+        affiliation: profiles.affiliation,
+        country: profiles.country,
+        mfa: sql<boolean>`${userMfa.enabledAt} is not null`,
+      })
+      .from(users)
+      .leftJoin(profiles, eq(profiles.id, users.id))
+      .leftJoin(userMfa, eq(userMfa.userId, users.id))
+      .where(eq(users.id, id));
+    if (!u) {
+      throw AppException.notFound('User');
+    }
+    const roles = (await this.rolesOf([id])).get(id) ?? [];
+    return {
+      id: u.id,
+      name: name(u.firstName, u.lastName, u.email),
+      email: u.email,
+      affiliation: u.affiliation,
+      country: u.country,
+      roles: [...(u.isSuperAdmin ? ['super_admin'] : []), ...roles],
+      status: u.status,
+      emailVerified: u.emailVerifiedAt !== null,
+      twoStepOn: u.mfa,
+      createdAt: u.createdAt.toISOString(),
+      lastSignInAt: u.lastSignInAt?.toISOString() ?? null,
+    };
+  }
+
   /** Chair / reviewer / cfp manager from active memberships, author from papers. */
   private async rolesOf(userIds: string[]): Promise<Map<string, string[]>> {
     const db = this.database.db;
@@ -299,6 +510,7 @@ export class AdminService {
           query.action
             ? sql`${auditLog.action} like ${`${query.action}%`}`
             : undefined,
+          query.actorId ? eq(auditLog.actorId, query.actorId) : undefined,
         ),
       )
       .orderBy(desc(auditLog.id))

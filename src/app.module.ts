@@ -20,6 +20,7 @@ import { PlanModule } from './core/plan/plan.service.js';
 import { StorageModule } from './core/storage/storage.module.js';
 import { RbacModule } from './core/rbac/rbac.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
+import { MasterDataModule } from './modules/master-data/master-data.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ConferencesModule } from './modules/conferences/conferences.module.js';
 import { AiModule } from './modules/ai/ai.module.js';
@@ -106,6 +107,7 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
     JobsModule,
     AiModule,
     AdminModule,
+    MasterDataModule,
   ],
   controllers: [HealthController],
   providers: [

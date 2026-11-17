@@ -12,6 +12,8 @@ const MFA_CHALLENGE_AUDIENCE = 'smartconferu-mfa';
 export const MFA_CHALLENGE_TTL_SECONDS = 300;
 const EVENT_TICKET_AUDIENCE = 'smartconferu-events';
 /** A live-events ticket only opens the stream; it is used at once. */
+/** How the second step of a sign-in is proven: the authenticator app, or a code emailed to a super admin. */
+export type MfaFactor = 'totp' | 'email';
 export const EVENT_TICKET_TTL_SECONDS = 60;
 
 /**
@@ -71,8 +73,12 @@ export class AccessTokenService {
    * Proof that a user passed the first step of sign-in and now owes a second factor. Signed with
    * the same key but for a different audience, so it can never be used as an access token.
    */
-  issueMfaChallenge(userId: string, method: string): Promise<string> {
-    return new SignJWT({ method })
+  issueMfaChallenge(
+    userId: string,
+    method: string,
+    factor: MfaFactor = 'totp',
+  ): Promise<string> {
+    return new SignJWT({ method, factor })
       .setProtectedHeader({ alg: 'EdDSA', kid: this.keyId, typ: 'JWT' })
       .setSubject(userId)
       .setIssuer(TOKEN_ISSUER)
@@ -85,7 +91,7 @@ export class AccessTokenService {
 
   async verifyMfaChallenge(
     token: string,
-  ): Promise<{ userId: string; method: string }> {
+  ): Promise<{ userId: string; method: string; factor: MfaFactor }> {
     const { payload } = await jwtVerify(token, this.publicKey, {
       issuer: TOKEN_ISSUER,
       audience: MFA_CHALLENGE_AUDIENCE,
@@ -97,6 +103,7 @@ export class AccessTokenService {
     return {
       userId: payload.sub,
       method: typeof payload.method === 'string' ? payload.method : 'unknown',
+      factor: payload.factor === 'email' ? 'email' : 'totp',
     };
   }
 

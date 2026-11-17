@@ -36,6 +36,27 @@
       "when": 1794463690185,
       "tag": "0004_email_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794901657364,
+      "tag": "0005_mfa_email_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794902150569,
+      "tag": "0006_master_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794902168037,
+      "tag": "0007_seed_master_data",
+      "breakpoints": true
     }
   ]
 }

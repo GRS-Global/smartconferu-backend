@@ -148,6 +148,19 @@ export const loginCode = (to: string, code: string): EmailMessage =>
       "The code works once and expires after 10 minutes. If you didn't ask for it, you can ignore this email.",
   });
 
+export const adminSignInCode = (to: string, code: string): EmailMessage =>
+  renderEmail({
+    to,
+    subject: `Your Smartconferu admin sign-in code: ${code}`,
+    heading: 'Your admin sign-in code',
+    paragraphs: [
+      'Someone signed in to the Smartconferu admin console with your password. Enter this code to finish signing in:',
+    ],
+    code,
+    footnote:
+      "The code works once and expires after 10 minutes. If this wasn't you, change your password straight away.",
+  });
+
 export const passwordChanged = (to: string): EmailMessage =>
   renderEmail({
     to,

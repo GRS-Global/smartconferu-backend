@@ -67,6 +67,7 @@ smartconferu-backend/
 │  │  ├─ reviews/          assignments, review form, chair reviews, sending decisions, reminders
 │  │  ├─ communications/   email templates, Email Logs, the chair's own emails
 │  │  ├─ notifications/    the bell (/me/notifications) and live events (/me/events, SSE)
+│  │  ├─ master-data/      societies, institutions, research areas (read by all, kept by the super admin)
 │  │  ├─ ai/               Claude helpers, paper RAG (pgvector) and chat, fill from website
 │  │  ├─ jobs/             background jobs: review reminders, cleanup, AI backlog
 │  │  └─ admin/            super-admin console: stats, users, activity, review health
@@ -178,6 +179,13 @@ How it works:
 - **Two-step verification:** authenticator app (TOTP) + 10 recovery codes. When on, sign-in
   answers `{ mfaRequired: true }` and sets a 5-minute `sc_mfa` cookie; `POST /auth/mfa/verify`
   with the code finishes it. A code can't be reused; 5 wrong codes lock it for 15 minutes.
+- **Super admins (admin console):** admin features need a two-step-verified session. Without an
+  authenticator app, a super admin's **password** sign-in answers
+  `{ mfaRequired: true, factor: "email" }` and emails a 6-digit code (10 minutes, newest only;
+  `POST /auth/mfa/email-code` sends a new one); `POST /auth/mfa/verify` with it opens a verified
+  session. With an authenticator app, `factor` is `totp` as for everyone. Signing in by code,
+  link or Google/Microsoft/ORCID gives an ordinary session: fine for the app, 403
+  `AUTH_MFA_REQUIRED` on `/admin/…`.
 - **Google, Microsoft, ORCID:** the app links to `/auth/oauth/<provider>/start?terms=<version>`;
   the API redirects back to `<APP_URL>/auth/callback?status=signed_in|mfa_required|linked` (or
   `error=…`) with the refresh cookie set. A provider account joins an existing account only when
@@ -327,6 +335,30 @@ How it works:
   fan-out is unit tested.
 - Paging uses `keyset()` (core/http/pagination.ts): times are compared to the millisecond, so
   rows saved in one transaction are never skipped at a page edge.
+
+## Super Admin console (modules/admin, modules/master-data)
+
+Every `/admin/…` route needs a super admin in a two-step-verified session (`@SuperAdminOnly()`).
+
+| Area                  | Endpoints                                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Dashboard             | `GET /admin/stats`, `GET /admin/activity` (`?action=`, `?actorId=`, `?before=`)                                  |
+| Conferences, requests | `GET /admin/conferences`, `POST /admin/conferences/:id/decision`, `…/undelete`, `…/papers`                       |
+| Deletion requests     | `GET /admin/deletion-requests`, `POST /admin/deletion-requests/:id/decision`                                     |
+| Users                 | `GET /admin/users`, `GET /admin/users/:id` (conferences, recent activity), `POST …/suspend`, `POST …/reactivate` |
+| Master data           | `/admin/master-data/societies`, `…/institutions` (+ `/:id/merge`), `…/research-areas`                            |
+| Email templates       | `/admin/email-templates` (see below)                                                                             |
+
+- **Suspend** sets the account to `disabled` and ends every session (an access token already
+  issued lasts its 15 minutes at most); signing in is refused until **reactivate**. Not your own
+  account, not another super admin's. Both are recorded with the optional reason.
+- **Master data** (`societies`, `institutions`, `research_areas`; migration 0007 copied the lists
+  the app shipped with): everyone reads the active entries at `GET /master-data/…` (public); the
+  super admin adds, edits, deactivates / retires (nothing is deleted) and merges institutions (the
+  duplicate's names become short forms of the kept one). Renaming a research area renames it on
+  every conference using it (conferences store the names as text). Every change is audited.
+  The AI's own copy of the taxonomy (`modules/ai/website/research-areas.ts`) is not yet read from
+  the table.
 
 ## Email templates and Email Logs (modules/communications)
 

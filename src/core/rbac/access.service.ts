@@ -9,7 +9,6 @@ import {
   reviewAssignments,
   submissionAuthors,
   submissions,
-  userMfa,
   users,
 } from '../database/schema/index.js';
 import { AppException, ErrorCode } from '../errors/app.exception.js';
@@ -49,28 +48,19 @@ export class AccessService {
   /** Throws unless the user may use super-admin features right now, saying what is missing. */
   async assertSuperAdmin(user: AuthUser): Promise<void> {
     const [row] = await this.database.db
-      .select({
-        isSuperAdmin: users.isSuperAdmin,
-        mfaOn: sql<boolean>`${userMfa.enabledAt} is not null`,
-      })
+      .select({ isSuperAdmin: users.isSuperAdmin })
       .from(users)
-      .leftJoin(userMfa, eq(userMfa.userId, users.id))
       .where(and(eq(users.id, user.id), eq(users.status, 'active')));
     if (!row?.isSuperAdmin) {
       throw AppException.forbidden();
     }
-    if (!row.mfaOn) {
-      throw new AppException(
-        HttpStatus.FORBIDDEN,
-        ErrorCode.AUTH_MFA_SETUP_REQUIRED,
-        'Turn on two-step verification to use admin features.',
-      );
-    }
+    // The second step is the authenticator app, or (without one) the code emailed at a password
+    // sign-in; either way the session is marked verified.
     if (!user.mfa) {
       throw new AppException(
         HttpStatus.FORBIDDEN,
         ErrorCode.AUTH_MFA_REQUIRED,
-        'Sign in again with your authenticator app to use admin features.',
+        'Sign in to the admin console with your password and the code we email you to use admin features.',
       );
     }
   }

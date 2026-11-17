@@ -125,6 +125,11 @@ pgvector cosine distance. Load the `claude-api` skill before changing Claude cal
 fetching is SSRF-safe (`website-reader.ts`); keep it that way.
 
 **Files.** `core/storage/file-storage.ts`: the abstract `FileStorage` has one driver for now, `LocalFileStorage` (`FILE_STORAGE_DIR`).
+
+**Super Admin.** `/admin/…` needs a super admin in a verified session: an authenticator app, or
+the code emailed at a password sign-in (`factor: "email"`). Master data lives in
+`modules/master-data` (societies, institutions, research areas). The console UI is in the
+frontend repo under `/super-admin` and calls this API.
 The S3-compatible driver waits for the hosting choice.
 
 ## Database changes
@@ -165,9 +170,12 @@ traps are `no-misused-spread` on DTO class instances (use `Object.assign`), `no-
 (use `Array.from`) and `no-thenable` in specs. Then update the README section, the plan doc's
 Progress/"Resume here", and report the test counts.
 
-## Still to do (as of 2026-11-16)
+## Still to do (as of 2026-11-17)
 
-1. S3-compatible storage driver, once the host is chosen.
-2. Admin actions the app doesn't have yet (disable a user, resend a failed email), if wanted.
-3. Infrastructure for the chosen host, then data migration from Supabase and the frontend
+1. S3-compatible storage driver, once the host is chosen (then society logo upload).
+2. Super Admin "Coming soon" modules: billing / licenses, announcements, license extensions, CFP
+   page review, profile verification, claim reports, names & lists, team & roles, audit log;
+   reset a user's two-step, merge accounts, suspend a conference, view as chair / user.
+3. The app's pickers and the AI's taxonomy copy reading master data from the tables.
+4. Infrastructure for the chosen host, then data migration from Supabase and the frontend
    switch, module by module, against the Swagger contract.

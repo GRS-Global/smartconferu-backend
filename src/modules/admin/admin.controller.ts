@@ -1,4 +1,17 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
+import type { AuthUser } from '../../core/auth/auth-user.js';
+import { CurrentUser } from '../../core/auth/auth.decorators.js';
+import { Client, type ClientInfo } from '../../core/http/client-info.js';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -13,7 +26,10 @@ import {
   ActivityQuery,
   AdminPaperResponse,
   AdminStatsResponse,
+  AdminUserDetailResponse,
   AdminUserPage,
+  AdminUserResponse,
+  SetUserStatusDto,
   UsersQuery,
 } from './dto/admin.dto.js';
 
@@ -52,6 +68,58 @@ export class AdminController {
   @ApiOkResponse({ type: AdminUserPage })
   users(@Query() query: UsersQuery): Promise<AdminUserPage> {
     return this.admin.users(query);
+  }
+
+  @Get('users/:userId')
+  @ApiOperation({
+    summary: 'One account: roles, conferences and recent activity',
+  })
+  @ApiOkResponse({ type: AdminUserDetailResponse })
+  user(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<AdminUserDetailResponse> {
+    return this.admin.user(userId);
+  }
+
+  @Post('users/:userId/suspend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Suspend an account: every session ends and signing in is refused (not your own, not a super admin)',
+  })
+  @ApiOkResponse({ type: AdminUserResponse })
+  suspend(
+    @CurrentUser() admin: AuthUser,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: SetUserStatusDto,
+    @Client() client: ClientInfo,
+  ): Promise<AdminUserResponse> {
+    return this.admin.setUserStatus(
+      admin,
+      userId,
+      'disabled',
+      dto.reason,
+      client,
+    );
+  }
+
+  @Post('users/:userId/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Let a suspended account sign in again' })
+  @ApiOkResponse({ type: AdminUserResponse })
+  reactivate(
+    @CurrentUser() admin: AuthUser,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: SetUserStatusDto,
+    @Client() client: ClientInfo,
+  ): Promise<AdminUserResponse> {
+    return this.admin.setUserStatus(
+      admin,
+      userId,
+      'active',
+      dto.reason,
+      client,
+    );
   }
 
   @Get('activity')

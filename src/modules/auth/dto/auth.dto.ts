@@ -177,6 +177,13 @@ export class MfaRequiredResponse {
   @ApiProperty({ example: true })
   mfaRequired: true;
 
+  @ApiProperty({
+    enum: ['totp', 'email'],
+    description:
+      'totp: a code from the authenticator app (or a recovery code). email: a code we just emailed (a super admin without an authenticator app).',
+  })
+  factor: 'totp' | 'email';
+
   @ApiProperty()
   message: string;
 }
