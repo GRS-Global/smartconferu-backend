@@ -1,0 +1,1 @@
+ALTER TYPE "public"."auth_token_purpose" ADD VALUE 'mfa_email_code';

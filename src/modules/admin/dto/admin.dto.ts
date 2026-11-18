@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -47,6 +48,14 @@ export class ActivityQuery {
   @IsOptional()
   @Matches(/^[a-z_.]{1,60}$/)
   action?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Only what this user did.',
+  })
+  @IsOptional()
+  @IsUUID()
+  actorId?: string;
 }
 
 class ConferenceCounts {
@@ -101,6 +110,43 @@ export class AdminUserResponse {
   @ApiProperty({ format: 'date-time' }) createdAt: string;
   @ApiProperty({ nullable: true, type: String, format: 'date-time' })
   lastSignInAt: string | null;
+}
+
+class AdminUserConference {
+  @ApiProperty({ format: 'uuid' }) id: string;
+  @ApiProperty() slug: string;
+  @ApiProperty() acronym: string;
+  @ApiProperty() title: string;
+  @ApiProperty({ example: 'active' }) status: string;
+  @ApiProperty({
+    type: [String],
+    example: ['chair'],
+    description: 'chair, cfp_manager, reviewer, author.',
+  })
+  roles: string[];
+  @ApiProperty({ description: 'Papers they submitted or are an author of.' })
+  papers: number;
+}
+
+export class AdminUserDetailResponse extends AdminUserResponse {
+  @ApiProperty({ type: [AdminUserConference] })
+  conferences: AdminUserConference[];
+  @ApiProperty({
+    type: () => [ActivityEntry],
+    description: 'The last 20 things they did.',
+  })
+  recentActivity: ActivityEntry[];
+}
+
+export class SetUserStatusDto {
+  @ApiPropertyOptional({
+    example: 'Spam submissions',
+    description: 'Why (kept in the activity log).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 export class AdminUserPage {

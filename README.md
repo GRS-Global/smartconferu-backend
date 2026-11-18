@@ -67,6 +67,7 @@ smartconferu-backend/
 │  │  ├─ reviews/          assignments, review form, chair reviews, sending decisions, reminders
 │  │  ├─ communications/   email templates, Email Logs, the chair's own emails
 │  │  ├─ notifications/    the bell (/me/notifications) and live events (/me/events, SSE)
+│  │  ├─ master-data/      societies, institutions, research areas (read by all, kept by the super admin)
 │  │  ├─ ai/               Claude helpers, paper RAG (pgvector) and chat, fill from website
 │  │  ├─ jobs/             background jobs: review reminders, cleanup, AI backlog
 │  │  └─ admin/            super-admin console: stats, users, activity, review health
@@ -178,6 +179,13 @@ How it works:
 - **Two-step verification:** authenticator app (TOTP) + 10 recovery codes. When on, sign-in
   answers `{ mfaRequired: true }` and sets a 5-minute `sc_mfa` cookie; `POST /auth/mfa/verify`
   with the code finishes it. A code can't be reused; 5 wrong codes lock it for 15 minutes.
+- **Super admins (admin console):** admin features need a two-step-verified session. Without an
+  authenticator app, a super admin's **password** sign-in answers
+  `{ mfaRequired: true, factor: "email" }` and emails a 6-digit code (10 minutes, newest only;
+  `POST /auth/mfa/email-code` sends a new one); `POST /auth/mfa/verify` with it opens a verified
+  session. With an authenticator app, `factor` is `totp` as for everyone. Signing in by code,
+  link or Google/Microsoft/ORCID gives an ordinary session: fine for the app, 403
+  `AUTH_MFA_REQUIRED` on `/admin/…`.
 - **Google, Microsoft, ORCID:** the app links to `/auth/oauth/<provider>/start?terms=<version>`;
   the API redirects back to `<APP_URL>/auth/callback?status=signed_in|mfa_required|linked` (or
   `error=…`) with the refresh cookie set. A provider account joins an existing account only when
@@ -328,6 +336,30 @@ How it works:
 - Paging uses `keyset()` (core/http/pagination.ts): times are compared to the millisecond, so
   rows saved in one transaction are never skipped at a page edge.
 
+## Super Admin console (modules/admin, modules/master-data)
+
+Every `/admin/…` route needs a super admin in a two-step-verified session (`@SuperAdminOnly()`).
+
+| Area                  | Endpoints                                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Dashboard             | `GET /admin/stats`, `GET /admin/activity` (`?action=`, `?actorId=`, `?before=`)                                  |
+| Conferences, requests | `GET /admin/conferences`, `POST /admin/conferences/:id/decision`, `…/undelete`, `…/papers`                       |
+| Deletion requests     | `GET /admin/deletion-requests`, `POST /admin/deletion-requests/:id/decision`                                     |
+| Users                 | `GET /admin/users`, `GET /admin/users/:id` (conferences, recent activity), `POST …/suspend`, `POST …/reactivate` |
+| Master data           | `/admin/master-data/societies`, `…/institutions` (+ `/:id/merge`), `…/research-areas`                            |
+| Email templates       | `/admin/email-templates` (see below)                                                                             |
+
+- **Suspend** sets the account to `disabled` and ends every session (an access token already
+  issued lasts its 15 minutes at most); signing in is refused until **reactivate**. Not your own
+  account, not another super admin's. Both are recorded with the optional reason.
+- **Master data** (`societies`, `institutions`, `research_areas`; migration 0007 copied the lists
+  the app shipped with): everyone reads the active entries at `GET /master-data/…` (public); the
+  super admin adds, edits, deactivates / retires (nothing is deleted) and merges institutions (the
+  duplicate's names become short forms of the kept one). Renaming a research area renames it on
+  every conference using it (conferences store the names as text). Every change is audited.
+  The AI's own copy of the taxonomy (`modules/ai/website/research-areas.ts`) is not yet read from
+  the table.
+
 ## Email templates and Email Logs (modules/communications)
 
 - `GET/PUT/DELETE /conferences/{id}/email-templates[/{key}]`: the conference's copy of each email
@@ -374,25 +406,141 @@ lock, so only one instance runs it), and the AI backlog. Tests turn it off and c
   3. `npm run test:e2e` (tests build their database from the migrations).
   4. On deploy, `node dist/migrate.js` applies pending migrations before the new version starts.
 
+### Migration files
+
+| File                        | What it does                                                    |
+| --------------------------- | --------------------------------------------------------------- |
+| `0000_extensions.sql`       | Turns on `pgvector` (embeddings for the paper AI)               |
+| `0001_baseline.sql`         | All 27 tables: the 22 from Supabase plus the new identity/audit |
+| `0002_mfa.sql`              | Two-step verification (`user_mfa`, `mfa_recovery_codes`)        |
+| `0003_terms_acceptance.sql` | Terms-acceptance columns                                        |
+| `0004_email_queue.sql`      | Columns for sending emails through the queue                    |
+| `meta/`                     | Drizzle's bookkeeping; never edit by hand                       |
+
+### Compared with Supabase
+
+- **All 22 Supabase tables** (from `supabase/migrations/` in the frontend repo) exist here with
+  the same names and columns, so data can be copied across one-to-one.
+- **7 tables are new**, because the API does its own sign-in instead of Supabase Auth: `users`,
+  `sessions`, `auth_tokens`, `user_identities`, `user_mfa`, `mfa_recovery_codes`, `audit_log`.
+- Supabase's SQL functions, triggers and RLS policies are not tables: they became API code
+  (permissions in `core/rbac/access-rules.ts`, emails and notifications in the services).
+- **Not moved yet:** the data itself and the uploaded files in Supabase Storage. Both move in the
+  data-migration step, after hosting is chosen.
+
+**On a real PostgreSQL server** (16+, with the pgvector extension available): set `DATABASE_URL`
+to it, then `npm run build` and `npm run db:migrate`. That creates the same tables there.
+
 ## Running locally
 
-Requires Node 22.18+. No Docker needed.
+Step by step, on a fresh Windows machine (macOS/Linux: the same, with `cp` instead of `copy`).
+**No PostgreSQL or Docker to install:** `npm run db:serve` runs an embedded PostgreSQL (PGlite)
+with pgvector, every migration applied and a demo account.
 
-```bash
+### 1. Install the tools (once)
+
+| Tool    | Version                               | Where                   |
+| ------- | ------------------------------------- | ----------------------- |
+| Node.js | **22.18 or newer** (22.x or 24.x LTS) | https://nodejs.org      |
+| Git     | any                                   | https://git-scm.com     |
+| pgAdmin | optional, to look at the tables       | https://www.pgadmin.org |
+
+Check in a new terminal: `node -v` (must print v22.18.0 or higher) and `git --version`.
+
+### 2. Get the code
+
+```powershell
+cd D:\Projects
+git clone https://github.com/GRS-Global/smartconferu-backend.git
 cd smartconferu-backend
 npm install
-cp .env.example .env
-npm run secrets:generate     # paste the output into .env
-npm run db:serve             # terminal 1: local Postgres on :54329 (keep it open)
-npm run start:dev            # terminal 2: http://localhost:3000, API docs at /docs
 ```
+
+The repository is private: the GitHub account on the machine needs access to GRS-Global.
+
+### 3. Create `.env`
+
+```powershell
+copy .env.example .env
+npm run secrets:generate
+```
+
+`secrets:generate` prints four lines (`JWT_PRIVATE_KEY`, `JWT_KEY_ID`, `TOKEN_HASH_SECRET`,
+`MFA_ENCRYPTION_KEY`): paste each over its empty line in `.env`. Then set the local database:
+
+```
+DATABASE_URL=postgres://postgres@127.0.0.1:54329/postgres
+```
+
+Everything else can stay as it is: emails are printed in the terminal instead of sent
+(`EMAIL_TRANSPORT=log`), sign-in with Google/Microsoft/ORCID and the AI features stay off until
+their keys are set (see [Optional settings](#optional-settings)), uploads go to `./storage`.
+
+### 4. Start the database (terminal 1, keep it open)
+
+```powershell
+npm run db:serve
+```
+
+The first run creates the database in `.pglite-dev/`, applies every migration and adds the demo
+account. It prints:
+
+```
+Local database ready: DATABASE_URL=postgres://postgres@127.0.0.1:54329/postgres
+Demo account: dev@example.test / smartconferu-dev
+```
+
+`npm run db:serve -- --fresh` wipes it and starts over.
+
+### 5. Start the API (terminal 2)
+
+```powershell
+cd D:\Projects\smartconferu-backend
+npm run start:dev
+```
+
+The API answers on http://localhost:3000/api/v1, and the API docs (Swagger) are at
+**http://localhost:3000/docs**. It restarts by itself when you change code.
+
+### 6. Check it works
+
+1. Open http://localhost:3000/docs.
+2. `POST /auth/sign-in` → **Try it out** → send
+   `{ "email": "dev@example.test", "password": "smartconferu-dev" }`.
+3. Copy `accessToken` from the response, click **Authorize** at the top, paste it.
+4. `GET /me` should return Dev User.
+
+More to try is in [Trying the API from /docs](#trying-the-api-from-docs).
+
+### 7. Run the checks (optional)
+
+```powershell
+npm run typecheck
+npm run lint
+npm test            # unit tests
+npm run test:e2e    # API tests (their own in-memory database; step 4 not needed)
+npm run build
+```
+
+### Good to know
 
 - **Demo account:** `dev@example.test` / `smartconferu-dev` (a super admin).
 - **Emails** (links, codes) are printed in the `start:dev` terminal while `EMAIL_TRANSPORT=log`.
 - **Local data** lives in `.pglite-dev/`. `npm run db:serve -- --fresh` starts over.
-- **pgAdmin / psql:** host `127.0.0.1`, port `54329`, user `postgres`, no password, database
-  `postgres`, tables under Schemas → public. (Port 5432 is a different, unrelated Postgres if
+- **Changed `.env`?** Restart `npm run start:dev`.
+- **pgAdmin / psql** (while `db:serve` runs): host `127.0.0.1`, port `54329`, user `postgres`, no
+  password, database `postgres`, tables under Schemas → public. They are empty apart from the
+  demo account and the default email templates. (Port 5432 is a different, unrelated Postgres if
   one is installed.)
+
+### Optional settings
+
+| Feature                            | In `.env`                                                | Note                                                                             |
+| ---------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Real emails                        | `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY`, `EMAIL_FROM` | `EMAIL_FROM` must use a domain verified in Resend                                |
+| AI features                        | `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`                    | Without them the AI endpoints answer with an error                               |
+| Google / Microsoft / ORCID sign-in | `<PROVIDER>_CLIENT_ID`, `<PROVIDER>_CLIENT_SECRET`       | Register `http://localhost:3000/api/v1/auth/oauth/<provider>/callback` with each |
+| The web app calling the API        | `APP_URL`, `CORS_ORIGINS`                                | Already set for Vite on `http://localhost:5173`                                  |
 
 ### Trying the API from /docs
 

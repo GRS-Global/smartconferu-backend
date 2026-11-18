@@ -18,6 +18,8 @@ export const authTokenPurpose = pgEnum('auth_token_purpose', [
   'change_email',
   /** Proves an address before a new SSO-only account is merged into the account that owns it. */
   'merge_account',
+  /** The emailed second step of a super admin's password sign-in (admin console). */
+  'mfa_email_code',
 ]);
 
 // Conferences --------------------------------------------------------------------------------

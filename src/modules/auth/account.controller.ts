@@ -302,6 +302,7 @@ export class AccountController {
       this.cookies.setMfaChallenge(res, outcome.challenge);
       return {
         mfaRequired: true,
+        factor: outcome.factor,
         message: 'Enter the code from your authenticator app.',
       };
     }

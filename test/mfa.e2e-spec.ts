@@ -5,6 +5,7 @@ import {
   APP_ORIGIN,
   cookieFrom,
   createTestApp,
+  emailCode,
   type TestApp,
   type TestUser,
 } from './support/test-app.js';
@@ -101,6 +102,7 @@ describe('Two-step verification (authenticator app)', () => {
     const first = await signIn(user);
     expect(first.body).toEqual({
       mfaRequired: true,
+      factor: 'totp',
       message: 'Enter the code from your authenticator app.',
     });
     expect(first.refresh).toBeUndefined();
@@ -191,39 +193,76 @@ describe('Two-step verification (authenticator app)', () => {
         .get('/api/v1/admin/access')
         .set('Authorization', `Bearer ${token}`);
 
-    it('must turn it on before using admin features', async () => {
+    const makeSuperAdmin = (id: string) =>
+      t.db.query('update users set is_super_admin = true where id = $1', [id]);
+
+    it('without an authenticator app, finish a password sign-in with an emailed code', async () => {
       const admin = await t.createUser();
-      await t.db.query('update users set is_super_admin = true where id = $1', [
-        admin.id,
-      ]);
-      const { body } = await signIn(admin);
+      await makeSuperAdmin(admin.id);
+      const first = await signIn(admin);
+      expect(first.body).toMatchObject({ mfaRequired: true, factor: 'email' });
+      expect(first.body.accessToken).toBeUndefined();
+      const mail = t.outbox().at(-1)!;
+      expect(mail.to).toBe(admin.email);
+      expect(mail.subject).toMatch(/admin sign-in code/);
 
-      const before = await adminAccess(body.accessToken).expect(403);
-      expect(before.body.code).toBe('AUTH_MFA_SETUP_REQUIRED');
+      const wrong = await verify(first.mfaCookie, '000000').expect(401);
+      expect(wrong.body.code).toBe('AUTH_INVALID_CODE');
 
-      const status = await http()
-        .get('/api/v1/auth/mfa')
-        .set('Authorization', `Bearer ${body.accessToken}`)
+      // "Send a new code": only the newest code works.
+      await http()
+        .post('/api/v1/auth/mfa/email-code')
+        .set('Origin', APP_ORIGIN)
+        .set('Cookie', first.mfaCookie ?? '')
+        .expect(204);
+      const resent = t.outbox().at(-1)!;
+      expect(resent.subject).not.toBe(mail.subject);
+      await verify(first.mfaCookie, emailCode(mail.text)).expect(401);
+
+      const done = await verify(first.mfaCookie, emailCode(resent.text)).expect(
+        200,
+      );
+      expect(decodeJwt(done.body.accessToken).mfa).toBe(true);
+      await adminAccess(done.body.accessToken).expect(200);
+    });
+
+    it('a sign-in code alone opens the app, not the admin features', async () => {
+      const admin = await t.createUser();
+      await makeSuperAdmin(admin.id);
+      await http()
+        .post('/api/v1/auth/sign-in/code')
+        .send({ email: admin.email })
+        .expect(202);
+      const res = await http()
+        .post('/api/v1/auth/sign-in/code/verify')
+        .send({ email: admin.email, code: emailCode(t.outbox().at(-1)!.text) })
         .expect(200);
-      expect(status.body.required).toBe(true);
+      const denied = await adminAccess(res.body.accessToken).expect(403);
+      expect(denied.body.code).toBe('AUTH_MFA_REQUIRED');
+    });
 
-      const setup = await http()
-        .post('/api/v1/auth/mfa/totp/setup')
-        .set('Authorization', `Bearer ${body.accessToken}`);
-      const enabled = await http()
-        .post('/api/v1/auth/mfa/totp/enable')
-        .set('Authorization', `Bearer ${body.accessToken}`)
-        .send({ code: codeAt(setup.body.secret) })
-        .expect(200);
-      await adminAccess(enabled.body.accessToken).expect(200);
+    it('with an authenticator app, use it instead of an email', async () => {
+      const admin = await t.createUser();
+      const { secret } = await withMfa(admin);
+      await makeSuperAdmin(admin.id);
+      const sent = t.outbox().length;
+      const first = await signIn(admin);
+      expect(first.body).toMatchObject({ mfaRequired: true, factor: 'totp' });
+      expect(t.outbox()).toHaveLength(sent);
+      const done = await verify(first.mfaCookie, codeAt(secret, 1)).expect(200);
+      await adminAccess(done.body.accessToken).expect(200);
+      // No emailed code for an authenticator-app challenge.
+      await http()
+        .post('/api/v1/auth/mfa/email-code')
+        .set('Origin', APP_ORIGIN)
+        .set('Cookie', first.mfaCookie ?? '')
+        .expect(401);
     });
 
     it('need a verified session, not only the password', async () => {
       const admin = await t.createUser();
-      await t.db.query('update users set is_super_admin = true where id = $1', [
-        admin.id,
-      ]);
       await withMfa(admin);
+      await makeSuperAdmin(admin.id);
       const res = await adminAccess(await t.tokenFor(admin.id, false)).expect(
         403,
       );

@@ -201,7 +201,8 @@ export class AccountService {
       recoveryCodesLeft: enabled
         ? await this.mfa.unusedRecoveryCodeCount(user.id)
         : 0,
-      required: user.isSuperAdmin,
+      // Super admins may use an authenticator app, or the code emailed at each admin sign-in.
+      required: false,
     };
   }
 

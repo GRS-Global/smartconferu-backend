@@ -2,7 +2,10 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.js';
 import { AuditService } from '../../core/audit/audit.service.js';
-import { AccessTokenService } from '../../core/auth/access-token.service.js';
+import {
+  AccessTokenService,
+  type MfaFactor,
+} from '../../core/auth/access-token.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { PasswordService } from '../../core/auth/password.service.js';
 import { normalizeEmail } from '../../core/auth/secrets.js';
@@ -40,7 +43,7 @@ export interface SignInResult {
 /** A sign-in either starts a session, or waits for the second factor first. */
 export type SignInOutcome =
   | { kind: 'session'; session: SignInResult }
-  | { kind: 'mfa_required'; challenge: string };
+  | { kind: 'mfa_required'; challenge: string; factor: MfaFactor };
 
 const fail = (status: HttpStatus, code: ErrorCode, message: string) =>
   new AppException(status, code, message);
@@ -326,7 +329,32 @@ export class AuthService {
       );
       return {
         kind: 'mfa_required',
+        factor: 'totp',
         challenge: await this.accessTokens.issueMfaChallenge(user.id, method),
+      };
+    }
+    // A super admin without an authenticator app proves the second step with a code emailed to
+    // them (the admin console's sign-in). Other ways in (code, link, Google…) give an ordinary
+    // session: fine for the app, not for admin features.
+    if (user.isSuperAdmin && method === 'password' && user.email) {
+      await this.sendMfaEmailCode(user.id, user.email, tx);
+      await this.audit.record(
+        {
+          action: 'auth.mfa_challenged',
+          actorId: user.id,
+          client,
+          data: { method, factor: 'email' },
+        },
+        tx,
+      );
+      return {
+        kind: 'mfa_required',
+        factor: 'email',
+        challenge: await this.accessTokens.issueMfaChallenge(
+          user.id,
+          method,
+          'email',
+        ),
       };
     }
     return {
@@ -362,7 +390,10 @@ export class AuthService {
       throw sessionExpired();
     }
     this.assertActive(user);
-    const { via } = await this.mfa.verify(user.id, code);
+    const via =
+      pending.factor === 'email'
+        ? await this.verifyMfaEmailCode(user, code, client)
+        : (await this.mfa.verify(user.id, code)).via;
     return this.database.transaction((tx) =>
       this.startSession(
         user,
@@ -373,6 +404,58 @@ export class AuthService {
         true,
       ),
     );
+  }
+
+  /** Emails a new code for a pending email second step (the "Send a new code" link). */
+  async resendMfaEmailCode(challenge: string | undefined): Promise<void> {
+    const pending = challenge
+      ? await this.accessTokens.verifyMfaChallenge(challenge).catch(() => null)
+      : null;
+    const user = pending ? await this.accounts.findById(pending.userId) : null;
+    if (!pending || pending.factor !== 'email' || !user?.email) {
+      throw sessionExpired();
+    }
+    this.assertActive(user);
+    await this.sendMfaEmailCode(user.id, user.email);
+  }
+
+  private async sendMfaEmailCode(
+    userId: string,
+    email: string,
+    executor?: Executor,
+  ): Promise<void> {
+    const code = await this.oneTimeTokens.issueCode(
+      'mfa_email_code',
+      email,
+      userId,
+      emails.LOGIN_CODE_TTL_MINUTES,
+      executor,
+    );
+    await this.email.sendQuietly(emails.adminSignInCode(email, code));
+  }
+
+  private async verifyMfaEmailCode(
+    user: UserRow,
+    code: string,
+    client: ClientInfo,
+  ): Promise<'email_code'> {
+    const consumed = user.email
+      ? await this.oneTimeTokens.verifyCode('mfa_email_code', user.email, code)
+      : null;
+    if (!consumed || consumed.userId !== user.id) {
+      await this.audit.record({
+        action: 'auth.sign_in_failed',
+        actorId: user.id,
+        client,
+        data: { method: 'mfa_email_code' },
+      });
+      throw fail(
+        HttpStatus.UNAUTHORIZED,
+        ErrorCode.AUTH_INVALID_CODE,
+        'That code is wrong or has expired. Send a new one and try again.',
+      );
+    }
+    return 'email_code';
   }
 
   // Sessions -----------------------------------------------------------------------------------
