@@ -8,6 +8,7 @@ import { NotificationsService } from '../../core/notifications/notifications.ser
 import { displayName, toConference } from './conference.mapper.js';
 import { ConferencesRepository } from './conferences.repository.js';
 import { ConferenceEmailsService } from './conference-emails.service.js';
+import type { CfpStatus } from './dto/cfp.dto.js';
 import type {
   AdminConferenceResponse,
   ConferenceStatus,
@@ -43,6 +44,79 @@ export class ConferenceAdminService {
         affiliation: row.requesterAffiliation,
       },
     }));
+  }
+
+  /** The Calls for Papers waiting for approval (or in another state), newest conference first. */
+  async listCfps(cfpState: CfpStatus): Promise<AdminConferenceResponse[]> {
+    const rows = await this.conferences.listAll(
+      this.database.db,
+      undefined,
+      cfpState,
+    );
+    return rows.map((row) => ({
+      ...toConference(row, { myRoles: [], isChair: true }),
+      requester: {
+        id: row.createdBy,
+        name: displayName(
+          row.requesterFirstName,
+          row.requesterLastName,
+          row.requesterEmail ?? 'Unknown',
+        ),
+        email: row.requesterEmail,
+        affiliation: row.requesterAffiliation,
+      },
+    }));
+  }
+
+  /** Approve: the Call for Papers goes live and the submission link opens. Decline: back to the chairs with a note. */
+  async decideCfp(
+    admin: AuthUser,
+    conferenceId: string,
+    approve: boolean,
+    note: string | null | undefined,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const now = new Date();
+      const moved = await this.conferences.decideCfp(tx, conferenceId, {
+        status: approve ? 'published' : 'rejected',
+        decidedAt: now,
+        adminNote: approve ? null : (note ?? null),
+      });
+      if (!moved) {
+        const exists = await this.conferences.findById(tx, conferenceId);
+        if (!exists) throw AppException.notFound('The conference');
+        throw AppException.businessRule(
+          'This Call for Papers is not waiting for approval (it was already decided, or was never sent).',
+        );
+      }
+      const conference = await this.conferences.findById(tx, conferenceId);
+      await this.notifications.notifyChairs(tx, conferenceId, {
+        kind: 'conference_decision',
+        title: approve
+          ? 'Call for Papers approved'
+          : 'Call for Papers not approved',
+        body: approve ? conference!.acronym : (note ?? conference!.acronym),
+      });
+      await this.emails.cfpDecided(
+        tx,
+        conference!,
+        approve,
+        note ?? null,
+        admin.id,
+      );
+      await this.audit.record(
+        {
+          action: approve ? 'cfp.approved' : 'cfp.declined',
+          actorId: admin.id,
+          entityType: 'conference',
+          entityId: conferenceId,
+          client,
+          data: note ? { note } : undefined,
+        },
+        tx,
+      );
+    });
   }
 
   /** Approve: the conference goes live and gets its email templates. Decline: with a note. */

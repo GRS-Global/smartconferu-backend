@@ -5,7 +5,9 @@ import { DatabaseService } from '../../core/database/database.service.js';
 import type { Tx } from '../../core/database/database.types.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
+import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import { canEditCfp, canViewTeam } from '../../core/rbac/access-rules.js';
+import { ConferenceEmailsService } from './conference-emails.service.js';
 import {
   AccessService,
   type ConferenceAccess,
@@ -23,6 +25,8 @@ function toCfp(row: CfpRow): CfpResponse {
     content: row.content as Record<string, unknown>,
     theme: row.theme as Record<string, unknown>,
     decidedAt: row.decidedAt?.toISOString() ?? null,
+    submittedAt: row.submittedAt?.toISOString() ?? null,
+    adminNote: row.adminNote,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -38,6 +42,8 @@ export class CfpsService {
     private readonly conferences: ConferencesRepository,
     private readonly access: AccessService,
     private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
+    private readonly emails: ConferenceEmailsService,
   ) {}
 
   /** The team sees the CFP in any state. */
@@ -79,7 +85,11 @@ export class CfpsService {
     });
   }
 
-  /** From now on the submission link works. Needs an approved (active) conference. */
+  /**
+   * "Publish" sends the CFP to the Super Admin: it waits as `in_review` and the submission link
+   * opens only when it is approved (ConferenceAdminService.decideCfp). A CFP that was approved
+   * before and then closed opens again at once. Needs an approved (active) conference.
+   */
   async publish(
     user: AuthUser,
     conferenceId: string,
@@ -93,16 +103,34 @@ export class CfpsService {
         );
       }
       const current = await this.conferences.findCfp(tx, conferenceId);
-      if (current.status === 'published') {
+      if (current.status === 'published' || current.status === 'in_review') {
         return toCfp(current);
       }
       const now = new Date();
+      if (current.status === 'closed') {
+        // It was approved when it first went live: opening it again needs no new approval.
+        const row = await this.conferences.updateCfp(tx, conferenceId, {
+          status: 'published',
+          decidedAt: now,
+        });
+        await this.record(tx, 'cfp.reopened', user, conferenceId, client);
+        return toCfp(row);
+      }
       const row = await this.conferences.updateCfp(tx, conferenceId, {
-        status: 'published',
-        submittedAt: current.submittedAt ?? now,
-        decidedAt: now,
+        status: 'in_review',
+        submittedAt: now,
+        decidedAt: null,
+        adminNote: null,
       });
-      await this.record(tx, 'cfp.published', user, conferenceId, client);
+      const conference = await this.emails.facts(tx, conferenceId);
+      await this.notifications.notifySuperAdmins(tx, {
+        kind: 'cfp_review',
+        title: 'Call for Papers waiting for approval',
+        body: `${conference.acronym} — ${conference.title}`,
+        conferenceId,
+      });
+      await this.emails.cfpSubmitted(tx, conference, user.id);
+      await this.record(tx, 'cfp.submitted', user, conferenceId, client);
       return toCfp(row);
     });
   }

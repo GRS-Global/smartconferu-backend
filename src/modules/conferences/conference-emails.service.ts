@@ -99,6 +99,65 @@ export class ConferenceEmailsService {
     });
   }
 
+  /** A chair or CFP manager sent the Call for Papers for approval → the super admins. */
+  async cfpSubmitted(
+    executor: Executor,
+    conference: ConferenceFacts,
+    senderId: string,
+  ): Promise<void> {
+    const sender = await this.one(executor, senderId);
+    const admins = await this.recipients.superAdmins(executor);
+    const review = this.recipients.link('/super-admin/cfp-requests');
+    const emails = admins.map((admin): WrittenEmail => ({
+      key: 'cfpReviewAdmin',
+      label: 'Call for Papers waiting for approval',
+      recipientType: 'Super Admin',
+      to: admin,
+      subject: `Call for Papers to approve: ${conference.acronym}`,
+      body:
+        `<p>Hi ${escapeHtml(firstName(admin.name, admin.email))},</p>` +
+        `<p>${escapeHtml(sender?.name ?? 'Someone')} (${escapeHtml(sender?.email ?? '')}) has sent the Call for Papers of <b>${escapeHtml(conference.acronym)}</b> — ${escapeHtml(conference.title)} for approval. Submissions open once you approve it.</p>` +
+        `<p>Review it in the Super Admin console: <a href="${escapeHtml(review)}" style="color:#4F46E5">${escapeHtml(review)}</a></p>`,
+    }));
+    await this.queue.enqueue(executor, 'conference_cfp_submitted', emails, {
+      sentBy: senderId,
+    });
+  }
+
+  /** A super admin approved or declined a Call for Papers → the conference's chairs. */
+  async cfpDecided(
+    executor: Executor,
+    conference: ConferenceFacts,
+    approved: boolean,
+    note: string | null,
+    adminId: string,
+  ): Promise<void> {
+    const chairs = await this.recipients.chairs(executor, conference.id);
+    const cfp = this.recipients.link(`/cfp-manager/${conference.slug}`);
+    const acronym = escapeHtml(conference.acronym);
+    const emails = chairs.map((chair): WrittenEmail => ({
+      key: approved ? 'cfpApproved' : 'cfpDeclined',
+      label: approved
+        ? 'Call for Papers approved'
+        : 'Call for Papers not approved',
+      recipientType: 'Chair',
+      conference: approved ? this.conference(conference) : null,
+      to: chair,
+      subject: approved
+        ? `The Call for Papers of ${conference.acronym} is live`
+        : `The Call for Papers of ${conference.acronym} was not approved`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(chair.name, chair.email))},</p>` +
+        (approved
+          ? `<p>The Call for Papers of <b>${acronym}</b> has been approved. Submissions are open now.</p>`
+          : `<p>The Call for Papers of <b>${acronym}</b> was not approved${note ? `:</p><p>“${escapeHtml(note)}”</p><p>` : '. '}Please update it and send it for approval again.</p>`) +
+        `<p><a href="${escapeHtml(cfp)}" style="color:#4F46E5">${escapeHtml(cfp)}</a></p>`,
+    }));
+    await this.queue.enqueue(executor, 'conference_cfp_decided', emails, {
+      sentBy: adminId,
+    });
+  }
+
   /** A super admin approved or declined a request → the chair who asked. */
   async decided(
     executor: Executor,

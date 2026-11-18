@@ -30,6 +30,11 @@ import { SubmissionsService } from './submissions.service.js';
     SubmissionFilesService,
   ],
   // The reviews module builds on the paper page, its context and its author emails.
-  exports: [SubmissionsRepository, SubmissionsService, SubmissionEmailsService],
+  exports: [
+    SubmissionsRepository,
+    SubmissionsService,
+    SubmissionEmailsService,
+    ScreeningService,
+  ],
 })
 export class SubmissionsModule {}

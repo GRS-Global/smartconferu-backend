@@ -79,6 +79,9 @@ describe('Submissions, screening and the email queue', () => {
     }
     if (publish) {
       await as(chair.token).post(`/conferences/${id}/cfp/publish`).expect(200);
+      await as(admin.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, { approve: true })
+        .expect(204);
     }
     // The conference's own emails (approval) are not what these tests look at.
     await t.sendQueuedEmails();

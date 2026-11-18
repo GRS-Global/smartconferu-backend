@@ -7,11 +7,13 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { IsJsonObjectOfSize } from '../../../core/validation/validators.js';
@@ -152,6 +154,18 @@ export class CreateSubmissionDto extends PaperDetailsDto {
 }
 
 export class UpdateDetailsDto extends PaperDetailsDto {}
+
+export class ConferencePapersQuery {
+  @ApiPropertyOptional({
+    description:
+      'Only the paper with this number in the conference (the 12 of "ICX-12").',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  paperNo?: number;
+}
 
 export class DuplicateQuery {
   @ApiProperty()

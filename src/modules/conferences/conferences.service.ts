@@ -28,6 +28,7 @@ import type {
   CreateConferenceDto,
   MyConferencesResponse,
   PublicConferenceResponse,
+  SubmissionFormResponse,
   UpdateConferenceDto,
 } from './dto/conference.dto.js';
 import type { DirectoryEntryResponse } from './dto/cfp.dto.js';
@@ -413,6 +414,41 @@ export class ConferencesService {
       return { status: 'archived', acronym: row.acronym, title: row.title };
     }
     throw AppException.notFound('The conference');
+  }
+
+  /**
+   * What the New Submission page needs, readable by authors (the chair's settings are not): the
+   * tracks, submission types, extra questions and guidelines the chair chose.
+   */
+  async submissionForm(slug: string): Promise<SubmissionFormResponse> {
+    const row = await this.conferences.findBySlug(this.database.db, slug);
+    if (row?.status !== 'active') {
+      throw AppException.notFound('The conference');
+    }
+    const settings = (row.settings ?? {}) as Record<string, unknown>;
+    const obj = (v: unknown): Record<string, unknown> =>
+      typeof v === 'object' && v && !Array.isArray(v)
+        ? (v as Record<string, unknown>)
+        : {};
+    const strings = (v: unknown): string[] =>
+      Array.isArray(v)
+        ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+        : [];
+    const tracks = Array.isArray(settings.tracks)
+      ? settings.tracks
+          .map((t) => obj(t).name)
+          .filter((n): n is string => typeof n === 'string' && n.trim() !== '')
+      : [];
+    const extras = obj(settings.submissionForm).extras;
+    const guidelines = obj(settings.submissionPolicy).guidelines;
+    return {
+      tracks,
+      presentationTypes: strings(settings.presentationTypes),
+      extras: Array.isArray(extras)
+        ? (extras as Record<string, unknown>[])
+        : [],
+      guidelines: typeof guidelines === 'string' ? guidelines : '',
+    };
   }
 
   // Helpers ----------------------------------------------------------------------------------

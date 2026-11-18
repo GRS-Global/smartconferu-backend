@@ -26,6 +26,7 @@ import type { Response } from 'express';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
+import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import { CfpsService } from './cfps.service.js';
 import { ConferencesService } from './conferences.service.js';
 import { CfpResponse, UpdateCfpDto } from './dto/cfp.dto.js';
@@ -54,7 +55,7 @@ class InviteResultResponse {
   @ApiProperty({ type: MemberResponse }) member: MemberResponse;
 }
 
-const ConferenceId = () => Param('conferenceId', ParseUUIDPipe);
+const ConferenceId = () => ConferenceRef();
 
 @ApiTags('conferences')
 @ApiBearerAuth()
@@ -225,7 +226,7 @@ export class ConferencesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Publish the CFP: the submission link opens (chairs, CFP managers)',
+      'Send the CFP to the Super Admin for approval (chairs, CFP managers). It goes live (the submission link opens) only once approved; a CFP that was approved before and then closed opens again at once.',
   })
   @ApiOkResponse({ type: CfpResponse })
   publishCfp(

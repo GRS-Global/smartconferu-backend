@@ -107,6 +107,11 @@ describe('Paper files, screening settings and AI mode', () => {
     await as(chair.token)
       .post(`/conferences/${conferenceId}/cfp/publish`)
       .expect(200);
+    await as(await t.tokenFor(admin.id, true))
+      .post(`/admin/conferences/${conferenceId}/cfp/decision`, {
+        approve: true,
+      })
+      .expect(204);
     if (aiMode) {
       await as(chair.token)
         .put(`/conferences/${conferenceId}/screening-settings`, {

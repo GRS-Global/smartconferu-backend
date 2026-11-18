@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import { conferences, submissions } from '../../core/database/schema/index.js';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
@@ -16,12 +18,14 @@ import { paperId } from '../submissions/submission.mapper.js';
 import { SubmissionsRepository } from '../submissions/submissions.repository.js';
 import { SubmissionsService } from '../submissions/submissions.service.js';
 import type {
+  ReviewFormResponse,
   AssignmentResponse,
   AssignReviewersDto,
   MyAssignmentResponse,
   PaperReviewsResponse,
   RespondToAssignmentDto,
   ReviewFieldsDto,
+  ReviewBoardResponse,
   ReviewResponse,
   SaveReviewDto,
   SaveReviewResponse,
@@ -141,6 +145,37 @@ export class ReviewsService {
     };
   }
 
+  /** The chair's review board: every submitted paper of the conference with its reviewers, their reviews and who is still to join. */
+  async reviewBoard(
+    user: AuthUser,
+    conferenceId: string,
+  ): Promise<ReviewBoardResponse> {
+    const db = this.database.db;
+    const access = await this.access.requireConference(user, conferenceId, db);
+    if (!rules.isChair(access)) {
+      throw AppException.forbidden(
+        'Only a chair of this conference can see its review board.',
+      );
+    }
+    const [ids, assignments, pending] = await Promise.all([
+      this.reviews.submittedPaperIds(db, conferenceId),
+      this.reviews.assignmentsOfConference(db, conferenceId),
+      this.reviews.pendingOfConference(db, conferenceId),
+    ]);
+    return {
+      conferenceId,
+      papers: ids.map((submissionId) => ({
+        submissionId,
+        assignments: assignments
+          .filter((b) => b.assignment.submissionId === submissionId)
+          .map((b) => toAssignment(b, null)),
+        pending: pending
+          .filter((p) => p.pending.submissionId === submissionId)
+          .map(toPending),
+      })),
+    };
+  }
+
   /** The reviewer's queue: every paper given to them (in one conference, or all). */
   async myAssignments(
     user: AuthUser,
@@ -176,6 +211,10 @@ export class ReviewsService {
             abstract: row.submission.abstract,
             keywords: row.submission.keywords,
             track: typeof details.track === 'string' ? details.track : null,
+            presentationType:
+              typeof details.presentationType === 'string'
+                ? details.presentationType
+                : null,
             conferenceId: row.submission.conferenceId,
             conferenceSlug: row.conference.slug,
             conferenceAcronym: row.conference.acronym,
@@ -212,6 +251,78 @@ export class ReviewsService {
       throw AppException.notFound('The review assignment');
     }
     return toAssignment(bundle, own ? access : null);
+  }
+
+  /**
+   * The review form of one assignment: the conference's own form and instructions (kept in its
+   * chair-only settings, so they are read here on the reviewer's behalf) and the decision once
+   * the authors were told. The assignment's reviewer, or a chair.
+   */
+  async reviewForm(
+    user: AuthUser,
+    assignmentId: string,
+  ): Promise<ReviewFormResponse> {
+    const db = this.database.db;
+    const bundle = await this.reviews.assignmentOf(db, assignmentId);
+    const access =
+      bundle &&
+      (await this.access.submissionAccess(
+        user,
+        bundle.assignment.submissionId,
+        db,
+      ));
+    const own = bundle?.assignment.reviewerId === user.id;
+    if (
+      !bundle ||
+      !access ||
+      !rules.canViewSubmission(access) ||
+      !(own || rules.canManageReviews(access))
+    ) {
+      throw AppException.notFound('The review assignment');
+    }
+    const conferenceId = access.conference.conferenceId;
+    const [conference] = await db
+      .select({ settings: conferences.settings })
+      .from(conferences)
+      .where(eq(conferences.id, conferenceId));
+    const settings = obj(conference?.settings);
+    const form = obj(settings.reviewForm);
+    const instructions = obj(settings.reviewInstructions);
+    const pdf = obj(instructions.pdf);
+
+    let decision: ReviewFormResponse['decision'] = null;
+    if (access.notifiedOutcome) {
+      const [paper] = await db
+        .select({ typeId: submissions.notifiedDecisionTypeId })
+        .from(submissions)
+        .where(eq(submissions.id, access.submissionId));
+      const type = (await this.reviews.decisionTypes(db, conferenceId)).find(
+        (t) => t.id === paper?.typeId,
+      );
+      decision = {
+        outcome: access.notifiedOutcome,
+        label: type?.label ?? null,
+        color: type?.color ?? null,
+      };
+    }
+    return {
+      form: Array.isArray(form.sections) ? form : null,
+      instructions: {
+        text: typeof instructions.text === 'string' ? instructions.text : '',
+        mode: instructions.mode === 'pdf' ? 'pdf' : 'html',
+        pdf:
+          typeof pdf.path === 'string' && pdf.path
+            ? {
+                path: pdf.path,
+                name:
+                  typeof pdf.name === 'string' && pdf.name
+                    ? pdf.name
+                    : 'Reviewer instructions.pdf',
+              }
+            : null,
+      },
+      decision,
+    };
   }
 
   // Chairs assign -------------------------------------------------------------------------------
@@ -927,3 +1038,9 @@ export class ReviewsService {
     );
   }
 }
+
+/** A JSON value as a plain object ({} for anything else). */
+const obj = (v: unknown): Record<string, unknown> =>
+  typeof v === 'object' && v && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {};

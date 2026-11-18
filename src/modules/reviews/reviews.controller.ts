@@ -22,6 +22,10 @@ import {
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
+import {
+  ConferenceRef,
+  ConferenceRefPipe,
+} from '../../core/http/conference-ref.pipe.js';
 import { DecisionsService } from './decisions.service.js';
 import {
   AssignmentResponse,
@@ -38,6 +42,7 @@ import {
   SaveReviewDto,
   SaveReviewResponse,
   ShareReviewDto,
+  ReviewFormResponse,
 } from './dto/review.dto.js';
 import { ReviewsService } from './reviews.service.js';
 
@@ -131,6 +136,19 @@ export class AssignmentsController {
     @Id('assignmentId') assignmentId: string,
   ): Promise<AssignmentResponse> {
     return this.reviews.assignment(user, assignmentId);
+  }
+
+  @Get(':assignmentId/review-form')
+  @ApiOperation({
+    summary:
+      "The review form of this assignment: the conference's own form and instructions, and the decision once the authors were told (its reviewer, or a chair)",
+  })
+  @ApiOkResponse({ type: ReviewFormResponse })
+  reviewForm(
+    @CurrentUser() user: AuthUser,
+    @Id('assignmentId') assignmentId: string,
+  ): Promise<ReviewFormResponse> {
+    return this.reviews.reviewForm(user, assignmentId);
   }
 
   @Post(':assignmentId/respond')
@@ -252,7 +270,7 @@ export class MyReviewsController {
   @ApiOkResponse({ type: [MyAssignmentResponse] })
   list(
     @CurrentUser() user: AuthUser,
-    @Query('conferenceId', new ParseUUIDPipe({ optional: true }))
+    @Query('conferenceId', ConferenceRefPipe)
     conferenceId?: string,
   ): Promise<MyAssignmentResponse[]> {
     return this.reviews.myAssignments(user, conferenceId);
@@ -271,7 +289,7 @@ export class DecisionTypesController {
   @ApiOkResponse({ type: [DecisionTypeResponse] })
   list(
     @CurrentUser() user: AuthUser,
-    @Id('conferenceId') conferenceId: string,
+    @ConferenceRef() conferenceId: string,
   ): Promise<DecisionTypeResponse[]> {
     return this.decisions.decisionTypes(user, conferenceId);
   }
@@ -283,7 +301,7 @@ export class DecisionTypesController {
   @ApiOkResponse({ type: [DecisionTypeResponse] })
   replace(
     @CurrentUser() user: AuthUser,
-    @Id('conferenceId') conferenceId: string,
+    @ConferenceRef() conferenceId: string,
     @Body() dto: DecisionTypesDto,
     @Client() client: ClientInfo,
   ): Promise<DecisionTypeResponse[]> {

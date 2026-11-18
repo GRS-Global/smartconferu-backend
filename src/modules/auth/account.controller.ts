@@ -24,10 +24,12 @@ import type { Response } from 'express';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser, Public } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
+import { AccountDeletionService } from './account-deletion.service.js';
 import { AccountService } from './account.service.js';
 import { AuthCookies, MFA_COOKIE, REFRESH_COOKIE } from './auth-cookies.js';
 import {
   ChangeEmailDto,
+  DeleteAccountDto,
   EmailDto,
   MessageResponse,
   MfaCodeDto,
@@ -86,8 +88,29 @@ class RecoveryCodesResponse {
 export class AccountController {
   constructor(
     private readonly account: AccountService,
+    private readonly deletion: AccountDeletionService,
     private readonly cookies: AuthCookies,
   ) {}
+
+  // Delete the account ------------------------------------------------------------------------
+
+  @Post('account/delete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Delete my own account for good (body: { confirm: 'DELETE' }). 409 with details.blockers when it still owns records that belong to conferences (created a conference, chairs one, submitted a paper, wrote a review).",
+  })
+  @ApiNoContentResponse()
+  async deleteAccount(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: DeleteAccountDto,
+    @Client() client: ClientInfo,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.deletion.delete(user, dto.confirm, client);
+    this.cookies.clear(res, REFRESH_COOKIE);
+  }
 
   // Email address ------------------------------------------------------------------------------
 

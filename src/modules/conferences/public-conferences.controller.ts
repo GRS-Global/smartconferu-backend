@@ -12,6 +12,7 @@ import { DirectoryEntryResponse } from './dto/cfp.dto.js';
 import {
   ArchivedConferenceNotice,
   PublicConferenceResponse,
+  SubmissionFormResponse,
 } from './dto/conference.dto.js';
 
 /** Readable without an account: the Smart CFP directory and the submission link. */
@@ -49,5 +50,15 @@ export class PublicConferencesController {
     @Param('slug') slug: string,
   ): Promise<PublicConferenceResponse | ArchivedConferenceNotice> {
     return this.conferences.findPublic(slug.toLowerCase());
+  }
+
+  @Get('conferences/:slug/submission-form')
+  @ApiOperation({
+    summary:
+      "The tracks, submission types, extra questions and guidelines of an active conference's submission form",
+  })
+  @ApiOkResponse({ type: SubmissionFormResponse })
+  submissionForm(@Param('slug') slug: string): Promise<SubmissionFormResponse> {
+    return this.conferences.submissionForm(slug.toLowerCase());
   }
 }

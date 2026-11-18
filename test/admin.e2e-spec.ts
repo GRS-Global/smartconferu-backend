@@ -69,6 +69,11 @@ describe('The super-admin console', () => {
     await as(chair.token)
       .post(`/conferences/${conferenceId}/cfp/publish`)
       .expect(200);
+    await as(admin.token)
+      .post(`/admin/conferences/${conferenceId}/cfp/decision`, {
+        approve: true,
+      })
+      .expect(204);
     const paper = await as(author.token)
       .post(`/conferences/${conferenceId}/submissions`, {
         title: 'A paper',

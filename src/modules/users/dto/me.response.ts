@@ -10,6 +10,12 @@ export class MeResponse {
   @ApiProperty()
   emailVerified: boolean;
 
+  @ApiProperty({
+    description:
+      'False for an account created through Google, Microsoft or ORCID that has no password yet (it can set one without a current password).',
+  })
+  hasPassword: boolean;
+
   @ApiProperty()
   firstName: string;
 

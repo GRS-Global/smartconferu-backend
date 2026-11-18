@@ -21,6 +21,7 @@ import { IsIn, IsOptional } from 'class-validator';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
+import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import { SuperAdminOnly } from '../../core/rbac/super-admin.guard.js';
 import { ConferenceAdminService } from './conference-admin.service.js';
 import {
@@ -37,6 +38,21 @@ class DeletionRequestQuery {
   @IsOptional()
   @IsIn(DELETION_STATUSES)
   status?: string;
+}
+
+const CFP_STATES = [
+  'draft',
+  'in_review',
+  'published',
+  'rejected',
+  'closed',
+] as const;
+
+class CfpStateQuery {
+  @ApiPropertyOptional({ enum: CFP_STATES, default: 'in_review' })
+  @IsOptional()
+  @IsIn(CFP_STATES)
+  status?: (typeof CFP_STATES)[number];
 }
 
 /** The super admin console: conference requests and deletion requests. */
@@ -62,11 +78,43 @@ export class ConferenceAdminController {
   @ApiNoContentResponse()
   decide(
     @CurrentUser() user: AuthUser,
-    @Param('conferenceId', ParseUUIDPipe) conferenceId: string,
+    @ConferenceRef() conferenceId: string,
     @Body() dto: DecisionDto,
     @Client() client: ClientInfo,
   ): Promise<void> {
     return this.admin.decide(user, conferenceId, dto.approve, dto.note, client);
+  }
+
+  @Get('cfps')
+  @ApiOperation({
+    summary:
+      'Calls for Papers by state (default: the ones waiting for approval), with who asked for the conference',
+  })
+  @ApiOkResponse({ type: [AdminConferenceResponse] })
+  listCfps(@Query() query: CfpStateQuery): Promise<AdminConferenceResponse[]> {
+    return this.admin.listCfps(query.status ?? 'in_review');
+  }
+
+  @Post('conferences/:conferenceId/cfp/decision')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Approve (submissions open) or decline (with a note) a Call for Papers sent for approval',
+  })
+  @ApiNoContentResponse()
+  decideCfp(
+    @CurrentUser() user: AuthUser,
+    @ConferenceRef() conferenceId: string,
+    @Body() dto: DecisionDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    return this.admin.decideCfp(
+      user,
+      conferenceId,
+      dto.approve,
+      dto.note,
+      client,
+    );
   }
 
   @Post('conferences/:conferenceId/undelete')
@@ -75,7 +123,7 @@ export class ConferenceAdminController {
   @ApiNoContentResponse()
   undelete(
     @CurrentUser() user: AuthUser,
-    @Param('conferenceId', ParseUUIDPipe) conferenceId: string,
+    @ConferenceRef() conferenceId: string,
     @Client() client: ClientInfo,
   ): Promise<void> {
     return this.admin.restoreDeleted(user, conferenceId, client);

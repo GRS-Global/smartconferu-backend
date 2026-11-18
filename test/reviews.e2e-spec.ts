@@ -98,6 +98,11 @@ describe('Peer review and decisions', () => {
     await as(chair.token)
       .post(`/conferences/${conferenceId}/cfp/publish`)
       .expect(200);
+    await as(admin.token)
+      .post(`/admin/conferences/${conferenceId}/cfp/decision`, {
+        approve: true,
+      })
+      .expect(204);
 
     const paper = await as(author.token)
       .post(`/conferences/${conferenceId}/submissions`, {
@@ -366,6 +371,86 @@ describe('Peer review and decisions', () => {
         .put(`/assignments/${s.assignmentId}/review`, { ...form, submit: true })
         .expect(422);
       expect(locked.body.message).toMatch(/already has a decision/);
+    });
+
+    it("gives the reviewer the conference's own review form and instructions, and the decision only once it was sent", async () => {
+      const s = await assigned();
+      // Standard form until the chair saves its own (kept in the chair-only settings).
+      const standard = await as(s.reviewer.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(200);
+      expect(standard.body).toEqual({
+        form: null,
+        instructions: { text: '', mode: 'html', pdf: null },
+        decision: null,
+      });
+      await as(s.chair.token)
+        .patch(`/conferences/${s.conferenceId}/settings`, {
+          settings: {
+            reviewForm: {
+              sections: [{ id: 's1', title: 'Quality', fields: [] }],
+            },
+            reviewInstructions: {
+              text: '<p>Be kind.</p>',
+              mode: 'pdf',
+              pdf: {
+                path: 'conferences/x/instructions.pdf',
+                name: 'How to review.pdf',
+              },
+            },
+          },
+        })
+        .expect(200);
+      const own = await as(s.reviewer.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(200);
+      expect(own.body.form.sections).toHaveLength(1);
+      expect(own.body.instructions).toEqual({
+        text: '<p>Be kind.</p>',
+        mode: 'pdf',
+        pdf: {
+          path: 'conferences/x/instructions.pdf',
+          name: 'How to review.pdf',
+        },
+      });
+      // The chair reads the same; the author and another reviewer do not.
+      await as(s.chair.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(200);
+      await as(s.author.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(404);
+      await as(s.second.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(404);
+
+      // A recorded decision stays hidden from the reviewer until it is sent to the authors.
+      const types = await as(s.chair.token)
+        .get(`/conferences/${s.conferenceId}/decision-types`)
+        .expect(200);
+      const accept = types.body.find(
+        (d: { outcome: string }) => d.outcome === 'accept',
+      );
+      await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/decision`, {
+          decisionTypeId: accept.id,
+        })
+        .expect(200);
+      const unsent = await as(s.reviewer.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(200);
+      expect(unsent.body.decision).toBeNull();
+      await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/decision/notify`)
+        .expect(200);
+      const sent = await as(s.reviewer.token)
+        .get(`/assignments/${s.assignmentId}/review-form`)
+        .expect(200);
+      expect(sent.body.decision).toEqual({
+        outcome: 'accept',
+        label: accept.label,
+        color: accept.color,
+      });
     });
 
     it('keeps reviews from authors and other reviewers', async () => {

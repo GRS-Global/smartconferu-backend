@@ -1,4 +1,5 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
+import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -66,9 +67,7 @@ export class AdminController {
     summary: "A conference's papers with their review stage and reviewers",
   })
   @ApiOkResponse({ type: [AdminPaperResponse] })
-  papers(
-    @Param('conferenceId', ParseUUIDPipe) conferenceId: string,
-  ): Promise<AdminPaperResponse[]> {
+  papers(@ConferenceRef() conferenceId: string): Promise<AdminPaperResponse[]> {
     return this.admin.conferencePapers(conferenceId);
   }
 }

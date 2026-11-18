@@ -10,6 +10,8 @@ export abstract class FileStorage {
   abstract put(key: string, data: Buffer, contentType: string): Promise<void>;
   abstract get(key: string): Promise<Buffer>;
   abstract delete(key: string): Promise<void>;
+  /** Removes everything under a folder (e.g. all of one person's files). Nothing to remove is not an error. */
+  abstract deleteFolder(prefix: string): Promise<void>;
 }
 
 /** Files in a folder on this machine. */
@@ -42,5 +44,9 @@ export class LocalFileStorage extends FileStorage {
 
   async delete(key: string): Promise<void> {
     await rm(this.path(key), { force: true });
+  }
+
+  async deleteFolder(prefix: string): Promise<void> {
+    await rm(this.path(prefix), { recursive: true, force: true });
   }
 }

@@ -66,7 +66,7 @@ export class UpdateMeDto {
   @IsOptional()
   @Transform(trimToNull)
   @Matches(/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/, {
-    message: 'orcidId must look like 0000-0002-1825-0097',
+    message: 'Enter your ORCID iD like 0000-0002-1825-0097.',
   })
   orcidId?: string | null;
 

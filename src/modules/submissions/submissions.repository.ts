@@ -548,4 +548,27 @@ export class SubmissionsRepository {
         and coalesce(s.screening -> (f.versions::text) -> 'check' ->> 'decision', 'pending') = 'pending'`);
     return [...rows].map((r) => r.id);
   }
+
+  /**
+   * Ids of the papers whose paper id reads `<prefix>-<paperNo>` ("ICX-12"). The prefix is the first
+   * word of the conference acronym, letters and digits only (see paperPrefix); two conferences can
+   * share a prefix, so the caller checks which one the user may see.
+   */
+  async idsByLabel(
+    executor: Executor,
+    prefix: string,
+    paperNo: number,
+  ): Promise<string[]> {
+    const rows = await executor
+      .select({ id: submissions.id })
+      .from(submissions)
+      .innerJoin(conferences, eq(conferences.id, submissions.conferenceId))
+      .where(
+        and(
+          eq(submissions.paperNo, paperNo),
+          sql`upper(regexp_replace(split_part(${conferences.acronym}, ' ', 1), '[^A-Za-z0-9]', '', 'g')) = ${prefix.toUpperCase()}`,
+        ),
+      );
+    return rows.map((r) => r.id);
+  }
 }

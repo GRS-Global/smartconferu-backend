@@ -15,6 +15,7 @@ import {
 } from '@nestjs/swagger';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
+import { DashboardResponse } from './dto/dashboard.response.js';
 import { MeResponse, MyConferenceResponse } from './dto/me.response.js';
 import { AcceptTermsDto, UpdateMeDto } from './dto/update-me.dto.js';
 import { UsersService } from './users.service.js';
@@ -54,6 +55,16 @@ export class UsersController {
     @Body() dto: AcceptTermsDto,
   ): Promise<MeResponse> {
     return this.users.acceptTerms(user, dto.version);
+  }
+
+  @Get('dashboard')
+  @ApiOperation({
+    summary:
+      "Everything the My Conferences dashboard needs in one call: conferences with the user's roles, their papers, assignments and invitations",
+  })
+  @ApiOkResponse({ type: DashboardResponse })
+  getDashboard(@CurrentUser() user: AuthUser): Promise<DashboardResponse> {
+    return this.users.getDashboard(user);
   }
 
   @Get('conferences')

@@ -292,6 +292,20 @@ export class PublicConferenceResponse {
   cfpStatus: string;
 }
 
+/** What the New Submission page shows: the chair's choices for the form (empty lists = the app's defaults). */
+export class SubmissionFormResponse {
+  @ApiProperty({ type: [String] }) tracks: string[];
+  @ApiProperty({ type: [String] }) presentationTypes: string[];
+  @ApiProperty({
+    description:
+      "The chair's extra questions (stored as the chair saved them).",
+    type: 'array',
+    items: { type: 'object', additionalProperties: true },
+  })
+  extras: Record<string, unknown>[];
+  @ApiProperty() guidelines: string;
+}
+
 /** The full record, for the conference's team, its creator and super admins. */
 export class ConferenceResponse extends PublicConferenceResponse {
   @ApiProperty({ enum: conferenceStatus.enumValues }) status: ConferenceStatus;

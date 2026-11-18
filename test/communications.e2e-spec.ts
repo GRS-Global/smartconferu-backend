@@ -68,6 +68,11 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
     await as(chair.token)
       .post(`/conferences/${conferenceId}/cfp/publish`)
       .expect(200);
+    await as(admin.token)
+      .post(`/admin/conferences/${conferenceId}/cfp/decision`, {
+        approve: true,
+      })
+      .expect(204);
     await t.sendQueuedEmails();
     t.outbox().length = 0;
     return { chair, admin, conferenceId };

@@ -336,6 +336,8 @@ export class ReviewPaperSummary {
   @ApiProperty() abstract: string;
   @ApiProperty({ type: [String] }) keywords: string[];
   @ApiProperty({ nullable: true, type: String }) track: string | null;
+  @ApiProperty({ nullable: true, type: String }) presentationType:
+    string | null;
   @ApiProperty({ format: 'uuid' }) conferenceId: string;
   @ApiProperty() conferenceSlug: string;
   @ApiProperty() conferenceAcronym: string;
@@ -344,6 +346,32 @@ export class ReviewPaperSummary {
 }
 
 /** One paper in a reviewer's queue. */
+/** One paper's reviewers on the chair's review board. */
+export class ReviewBoardPaperResponse {
+  @ApiProperty({ format: 'uuid' }) submissionId: string;
+  @ApiProperty({
+    type: [AssignmentResponse],
+    description:
+      'Every assignment, whatever its state (open, sent, declined, removed).',
+  })
+  assignments: AssignmentResponse[];
+  @ApiProperty({
+    type: [PendingAssignmentResponse],
+    description: 'Waiting for an invited reviewer who has not joined yet.',
+  })
+  pending: PendingAssignmentResponse[];
+}
+
+/** Every paper's reviewers and reviews in one read (chairs). */
+export class ReviewBoardResponse {
+  @ApiProperty({ format: 'uuid' }) conferenceId: string;
+  @ApiProperty({
+    type: [ReviewBoardPaperResponse],
+    description: 'One entry per submitted paper (drafts left out).',
+  })
+  papers: ReviewBoardPaperResponse[];
+}
+
 export class MyAssignmentResponse extends AssignmentResponse {
   @ApiProperty({ type: ReviewPaperSummary }) paper: ReviewPaperSummary;
 }
@@ -376,4 +404,48 @@ export class DecisionSentResponse {
       'The authors had been told a different decision before ("Decision changed").',
   })
   changed: boolean;
+}
+
+export class ReviewInstructionsResponse {
+  @ApiProperty({
+    description:
+      "The chair's instructions as text/HTML ('' = the standard text).",
+  })
+  text: string;
+  @ApiProperty({ enum: ['html', 'pdf'] }) mode: 'html' | 'pdf';
+  @ApiProperty({
+    nullable: true,
+    type: 'object',
+    additionalProperties: true,
+    description:
+      'The attached PDF: { path, name }. Read it with GET /files/public?path=.',
+  })
+  pdf: { path: string; name: string } | null;
+}
+
+export class SentDecisionResponse {
+  @ApiProperty({ enum: decisionOutcome.enumValues }) outcome: DecisionOutcome;
+  @ApiProperty({ nullable: true, type: String }) label: string | null;
+  @ApiProperty({ nullable: true, type: String }) color: string | null;
+}
+
+/** What the review form of one assignment is built from: the chair's own form and instructions, and the decision once the authors were told. */
+export class ReviewFormResponse {
+  @ApiProperty({
+    nullable: true,
+    type: 'object',
+    additionalProperties: true,
+    description:
+      "The conference's own review form as the chair saved it ({ sections }); null = the standard form.",
+  })
+  form: Record<string, unknown> | null;
+  @ApiProperty({ type: ReviewInstructionsResponse })
+  instructions: ReviewInstructionsResponse;
+  @ApiProperty({
+    nullable: true,
+    type: SentDecisionResponse,
+    description:
+      'The decision the chair has sent to the authors (reviewers hear it when the authors do); null before.',
+  })
+  decision: SentDecisionResponse | null;
 }

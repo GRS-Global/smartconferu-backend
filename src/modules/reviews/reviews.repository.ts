@@ -110,6 +110,97 @@ export class ReviewsRepository {
     }));
   }
 
+  /** Every assignment of every paper of a conference, with the reviewer's name and the review (the chair's review board). */
+  async assignmentsOfConference(
+    executor: Executor,
+    conferenceId: string,
+  ): Promise<AssignmentBundle[]> {
+    const rows = await executor
+      .select({
+        assignment: reviewAssignments,
+        review: reviews,
+        name: personName,
+        email: users.email,
+      })
+      .from(reviewAssignments)
+      .innerJoin(
+        submissions,
+        eq(submissions.id, reviewAssignments.submissionId),
+      )
+      .innerJoin(users, eq(users.id, reviewAssignments.reviewerId))
+      .leftJoin(profiles, eq(profiles.id, users.id))
+      .leftJoin(reviews, eq(reviews.assignmentId, reviewAssignments.id))
+      .where(eq(submissions.conferenceId, conferenceId))
+      .orderBy(asc(reviewAssignments.assignedAt), asc(reviewAssignments.id));
+    return rows.map((r) => ({
+      assignment: r.assignment,
+      review: r.review,
+      reviewer: {
+        userId: r.assignment.reviewerId,
+        name: r.name,
+        email: r.email,
+      },
+    }));
+  }
+
+  /** Papers of a conference waiting for an invited reviewer who has not joined the committee yet. */
+  async pendingOfConference(
+    executor: Executor,
+    conferenceId: string,
+  ): Promise<PendingBundle[]> {
+    const rows = await executor
+      .select({
+        pending: pendingReviewAssignments,
+        displayName: conferenceMembers.displayName,
+        invitedEmail: conferenceMembers.invitedEmail,
+        name: sql<
+          string | null
+        >`nullif(trim(${profiles.firstName} || ' ' || ${profiles.lastName}), '')`,
+        email: users.email,
+      })
+      .from(pendingReviewAssignments)
+      .innerJoin(
+        submissions,
+        eq(submissions.id, pendingReviewAssignments.submissionId),
+      )
+      .innerJoin(
+        conferenceMembers,
+        eq(conferenceMembers.id, pendingReviewAssignments.memberId),
+      )
+      .leftJoin(users, eq(users.id, conferenceMembers.userId))
+      .leftJoin(profiles, eq(profiles.id, conferenceMembers.userId))
+      .where(eq(submissions.conferenceId, conferenceId))
+      .orderBy(asc(pendingReviewAssignments.createdAt));
+    return rows.map((r) => ({
+      pending: r.pending,
+      name:
+        r.name ??
+        r.displayName ??
+        r.invitedEmail ??
+        r.email ??
+        'Invited reviewer',
+      email: r.email ?? r.invitedEmail,
+    }));
+  }
+
+  /** The ids of a conference's papers that were submitted (not drafts). */
+  async submittedPaperIds(
+    executor: Executor,
+    conferenceId: string,
+  ): Promise<string[]> {
+    const rows = await executor
+      .select({ id: submissions.id })
+      .from(submissions)
+      .where(
+        and(
+          eq(submissions.conferenceId, conferenceId),
+          ne(submissions.status, 'draft'),
+        ),
+      )
+      .orderBy(asc(submissions.paperNo));
+    return rows.map((r) => r.id);
+  }
+
   async assignmentOf(
     executor: Executor,
     assignmentId: string,
@@ -550,5 +641,95 @@ export class ReviewsRepository {
       .from(conferences)
       .where(eq(conferences.id, conferenceId));
     return row;
+  }
+
+  /** Review progress of every paper of a conference: reviewers on it, reviews sent, their average score. */
+  async paperStats(
+    executor: Executor,
+    conferenceId: string,
+  ): Promise<
+    Map<
+      string,
+      {
+        reviewersAssigned: number;
+        reviewsReceived: number;
+        averageScore: number | null;
+      }
+    >
+  > {
+    const [assigned, pending, received] = await Promise.all([
+      executor
+        .select({
+          submissionId: reviewAssignments.submissionId,
+          n: sql<number>`count(*)::int`,
+        })
+        .from(reviewAssignments)
+        .innerJoin(
+          submissions,
+          eq(submissions.id, reviewAssignments.submissionId),
+        )
+        .where(
+          and(
+            eq(submissions.conferenceId, conferenceId),
+            inArray(reviewAssignments.status, [
+              'assigned',
+              'accepted',
+              'submitted',
+            ]),
+          ),
+        )
+        .groupBy(reviewAssignments.submissionId),
+      executor
+        .select({
+          submissionId: pendingReviewAssignments.submissionId,
+          n: sql<number>`count(*)::int`,
+        })
+        .from(pendingReviewAssignments)
+        .innerJoin(
+          submissions,
+          eq(submissions.id, pendingReviewAssignments.submissionId),
+        )
+        .where(eq(submissions.conferenceId, conferenceId))
+        .groupBy(pendingReviewAssignments.submissionId),
+      executor
+        .select({
+          submissionId: reviews.submissionId,
+          n: sql<number>`count(*)::int`,
+          average: sql<number | null>`avg(${reviews.score})::float8`,
+        })
+        .from(reviews)
+        .innerJoin(submissions, eq(submissions.id, reviews.submissionId))
+        .where(
+          and(
+            eq(submissions.conferenceId, conferenceId),
+            eq(reviews.status, 'submitted'),
+          ),
+        )
+        .groupBy(reviews.submissionId),
+    ]);
+    const stats = new Map<
+      string,
+      {
+        reviewersAssigned: number;
+        reviewsReceived: number;
+        averageScore: number | null;
+      }
+    >();
+    const entry = (id: string) => {
+      let e = stats.get(id);
+      if (!e) {
+        e = { reviewersAssigned: 0, reviewsReceived: 0, averageScore: null };
+        stats.set(id, e);
+      }
+      return e;
+    };
+    for (const r of assigned) entry(r.submissionId).reviewersAssigned += r.n;
+    for (const r of pending) entry(r.submissionId).reviewersAssigned += r.n;
+    for (const r of received) {
+      const e = entry(r.submissionId);
+      e.reviewsReceived = r.n;
+      e.averageScore = r.average;
+    }
+    return stats;
   }
 }

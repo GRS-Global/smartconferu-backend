@@ -3,6 +3,7 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
 import type { Executor } from '../../core/database/database.types.js';
 import { AppException } from '../../core/errors/app.exception.js';
+import type { DashboardResponse } from './dto/dashboard.response.js';
 import type { MeResponse, MyConferenceResponse } from './dto/me.response.js';
 import type { UpdateMeDto } from './dto/update-me.dto.js';
 import { type ProfileUpdate, UsersRepository } from './users.repository.js';
@@ -62,6 +63,73 @@ export class UsersService {
     return this.users.listConferences(this.database.db, user.id);
   }
 
+  /** One call for the whole "My Conferences" dashboard (conferences, roles, papers, assignments, invitations). */
+  async getDashboard(user: AuthUser): Promise<DashboardResponse> {
+    const db = this.database.db;
+    const memberships = await this.users.dashboardMemberships(db, user.id);
+    const active = memberships.filter((m) => m.status === 'active');
+    const chairedIds = [
+      ...new Set(
+        active
+          .filter((m) => m.role === 'chair' || m.role === 'track_chair')
+          .map((m) => m.conferenceId),
+      ),
+    ];
+    const [authored, assignments, chairPapers] = await Promise.all([
+      this.users.dashboardAuthorPapers(db, user.id),
+      this.users.dashboardAssignments(db, user.id),
+      this.users.dashboardChairPapers(db, chairedIds),
+    ]);
+
+    // Roles per conference: member roles count only while active; "author" comes from submissions,
+    // "reviewer" also from having an assignment.
+    const roles = new Map<string, Set<string>>();
+    const addRole = (conferenceId: string, role: string) => {
+      const set = roles.get(conferenceId) ?? new Set<string>();
+      set.add(role);
+      roles.set(conferenceId, set);
+    };
+    for (const m of active) addRole(m.conferenceId, m.role);
+    for (const a of authored) addRole(a.conferenceId, 'author');
+    for (const a of assignments) addRole(a.conferenceId, 'reviewer');
+
+    const rows = await this.users.dashboardConferences(db, [...roles.keys()]);
+    const shown = new Set(rows.map((r) => r.conferenceId));
+
+    return {
+      conferences: rows.map((c) => ({
+        ...c,
+        reviewDeadline: c.reviewDeadline?.toISOString() ?? null,
+        roles: [...(roles.get(c.conferenceId) ?? [])],
+      })),
+      authorPapers: authored.filter((p) => shown.has(p.conferenceId)),
+      chairPapers: chairPapers.filter((p) => shown.has(p.conferenceId)),
+      reviewerAssignments: assignments
+        .filter((a) => shown.has(a.conferenceId))
+        .map(({ reviewStatus, dueAt, ...a }) => ({
+          ...a,
+          reviewed: reviewStatus === 'submitted',
+          dueAt: dueAt?.toISOString() ?? null,
+        })),
+      invitations: memberships
+        .filter((m) => m.role === 'reviewer' || m.status === 'invited')
+        .map((m) => ({
+          memberId: m.memberId,
+          conferenceId: m.conferenceId,
+          slug: m.slug,
+          acronym: m.acronym,
+          title: m.title,
+          country: m.country,
+          role: m.role,
+          status: m.status,
+          maxPapers: m.maxPapers,
+          invitedAt: m.invitedAt.toISOString(),
+          respondedAt: m.respondedAt?.toISOString() ?? null,
+          declineReason: m.declineReason,
+        })),
+    };
+  }
+
   private async loadMe(
     executor: Executor,
     userId: string,
@@ -75,6 +143,7 @@ export class UsersService {
       id: profile.id,
       email: profile.email,
       emailVerified: profile.emailVerifiedAt !== null,
+      hasPassword: profile.hasPassword,
       firstName: profile.firstName,
       lastName: profile.lastName,
       designation: profile.designation,

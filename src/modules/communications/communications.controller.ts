@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Put,
   Query,
@@ -21,6 +20,7 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
+import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import { SuperAdminOnly } from '../../core/rbac/super-admin.guard.js';
 import { CommunicationsService } from './communications.service.js';
 import {
@@ -37,7 +37,7 @@ import {
   UpdatePlatformTemplateDto,
 } from './dto/communications.dto.js';
 
-const ConferenceId = () => Param('conferenceId', ParseUUIDPipe);
+const ConferenceId = () => ConferenceRef();
 
 function templateKey(key: string): string {
   if (!TEMPLATE_KEY.test(key)) {

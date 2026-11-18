@@ -44,6 +44,19 @@ export class CfpResponse {
     description: 'When it was published or closed.',
   })
   decidedAt: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: 'When it was last sent to the Super Admin for approval.',
+  })
+  submittedAt: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: "The Super Admin's note, e.g. why the CFP was not approved.",
+  })
+  adminNote: string | null;
   @ApiProperty({ format: 'date-time' }) updatedAt: string;
 }
 

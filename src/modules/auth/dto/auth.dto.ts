@@ -195,6 +195,16 @@ export class MfaCodeDto {
   code: string;
 }
 
+export class DeleteAccountDto {
+  @ApiProperty({
+    example: 'DELETE',
+    description: 'The word DELETE (any case), as typed by the person.',
+  })
+  @IsString()
+  @MaxLength(20)
+  confirm: string;
+}
+
 export class ChangeEmailDto {
   @ApiProperty({ example: 'ada@new-university.edu' })
   @Transform(trim)

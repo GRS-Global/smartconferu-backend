@@ -196,6 +196,17 @@ export class SubmissionsService {
   async listForConference(
     user: AuthUser,
     conferenceId: string,
+    paperNo?: number,
+  ): Promise<SubmissionResponse[]> {
+    const all = await this.listAllForConference(user, conferenceId);
+    return paperNo === undefined
+      ? all
+      : all.filter((p) => p.paperNo === paperNo);
+  }
+
+  private async listAllForConference(
+    user: AuthUser,
+    conferenceId: string,
   ): Promise<SubmissionResponse[]> {
     const db = this.database.db;
     const access = await this.access.requireConference(user, conferenceId);
@@ -215,6 +226,30 @@ export class SubmissionsService {
       ...own,
       ...assigned.filter((b) => !ids.has(b.submission.id)),
     ]);
+  }
+
+  /**
+   * The paper page found by its paper id ("ICX-12") instead of its UUID. Several conferences can
+   * share a prefix: the first one the user may see wins. 404 when none.
+   */
+  async getByLabel(user: AuthUser, label: string): Promise<SubmissionResponse> {
+    const match = /^([A-Za-z0-9]{1,40})-(\d{1,9})$/.exec(label);
+    if (match) {
+      const db = this.database.db;
+      const ids = await this.submissions.idsByLabel(
+        db,
+        match[1],
+        Number(match[2]),
+      );
+      for (const id of ids) {
+        try {
+          return await this.view(db, user, id);
+        } catch (error) {
+          if (!(error instanceof AppException)) throw error;
+        }
+      }
+    }
+    throw AppException.notFound('The paper');
   }
 
   /** The paper page. 404 for anyone who may not see it. */

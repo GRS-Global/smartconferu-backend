@@ -14,5 +14,6 @@ async function bootstrap() {
     infer: true,
   });
   await app.listen(port);
+  console.log('Server running on: ', port);
 }
 await bootstrap();

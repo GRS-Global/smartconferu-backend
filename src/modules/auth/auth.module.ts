@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { UsersModule } from '../users/users.module.js';
 import { AccountController } from './account.controller.js';
+import { AccountDeletionService } from './account-deletion.service.js';
 import { AccountService } from './account.service.js';
 import { AuthCookies } from './auth-cookies.js';
 import { AuthController } from './auth.controller.js';
@@ -19,6 +20,7 @@ import { SessionsService } from './sessions.service.js';
   providers: [
     AuthService,
     AccountService,
+    AccountDeletionService,
     AuthRepository,
     AuthCookies,
     SessionsService,

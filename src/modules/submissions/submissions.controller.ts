@@ -30,9 +30,11 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
+import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import {
   AuthorListDto,
   CreateSubmissionDto,
+  ConferencePapersQuery,
   DuplicateQuery,
   DuplicateResponse,
   EmailsQueuedResponse,
@@ -74,7 +76,7 @@ export class ScreeningSettingsController {
   @ApiOkResponse({ type: ScreeningSettingsResponse })
   get(
     @CurrentUser() user: AuthUser,
-    @Param('conferenceId', ParseUUIDPipe) conferenceId: string,
+    @ConferenceRef() conferenceId: string,
   ): Promise<ScreeningSettingsResponse> {
     return this.screening.getSettings(user, conferenceId);
   }
@@ -87,7 +89,7 @@ export class ScreeningSettingsController {
   @ApiOkResponse({ type: ScreeningSettingsResponse })
   update(
     @CurrentUser() user: AuthUser,
-    @Param('conferenceId', ParseUUIDPipe) conferenceId: string,
+    @ConferenceRef() conferenceId: string,
     @Body() dto: UpdateScreeningSettingsDto,
     @Client() client: ClientInfo,
   ): Promise<ScreeningSettingsResponse> {
@@ -95,7 +97,7 @@ export class ScreeningSettingsController {
   }
 }
 
-const ConferenceId = () => Param('conferenceId', ParseUUIDPipe);
+const ConferenceId = () => ConferenceRef();
 const SubmissionId = () => Param('submissionId', ParseUUIDPipe);
 const Version = () =>
   Param(
@@ -134,8 +136,13 @@ export class ConferenceSubmissionsController {
   list(
     @CurrentUser() user: AuthUser,
     @ConferenceId() conferenceId: string,
+    @Query() query: ConferencePapersQuery,
   ): Promise<SubmissionResponse[]> {
-    return this.submissions.listForConference(user, conferenceId);
+    return this.submissions.listForConference(
+      user,
+      conferenceId,
+      query.paperNo,
+    );
   }
 
   @Get('duplicate-check')
@@ -258,6 +265,19 @@ export class SubmissionsController {
   @ApiOkResponse({ type: [SubmissionResponse] })
   listMine(@CurrentUser() user: AuthUser): Promise<SubmissionResponse[]> {
     return this.submissions.listMine(user);
+  }
+
+  @Get('by-label/:label')
+  @ApiOperation({
+    summary:
+      'The paper page found by its paper id as people see it ("ICX-12"). 404 if there is none I may see.',
+  })
+  @ApiOkResponse({ type: SubmissionResponse })
+  getByLabel(
+    @CurrentUser() user: AuthUser,
+    @Param('label') label: string,
+  ): Promise<SubmissionResponse> {
+    return this.submissions.getByLabel(user, label);
   }
 
   @Get(':submissionId')

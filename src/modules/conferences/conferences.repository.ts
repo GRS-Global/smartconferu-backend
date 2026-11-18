@@ -278,6 +278,22 @@ export class ConferencesRepository {
     return row;
   }
 
+  /** Moves a CFP that waits for approval; undefined when it is no longer waiting. */
+  async decideCfp(
+    tx: Executor,
+    conferenceId: string,
+    values: Partial<typeof cfps.$inferInsert>,
+  ): Promise<CfpRow | undefined> {
+    const [row] = await tx
+      .update(cfps)
+      .set(values)
+      .where(
+        and(eq(cfps.conferenceId, conferenceId), eq(cfps.status, 'in_review')),
+      )
+      .returning();
+    return row;
+  }
+
   // Approval ---------------------------------------------------------------------------------
 
   /** The conference gets its own copy of every platform email template when it goes live. */
@@ -305,7 +321,11 @@ export class ConferencesRepository {
   }
 
   /** Every conference for the super admin, newest first, with who asked for it. */
-  listAll(tx: Executor, status?: ConferenceRow['status']) {
+  listAll(
+    tx: Executor,
+    status?: ConferenceRow['status'],
+    cfpState?: CfpRow['status'],
+  ) {
     return tx
       .select({
         ...withCfp,
@@ -318,7 +338,12 @@ export class ConferencesRepository {
       .leftJoin(cfps, eq(cfps.conferenceId, conferences.id))
       .innerJoin(users, eq(users.id, conferences.createdBy))
       .leftJoin(profiles, eq(profiles.id, conferences.createdBy))
-      .where(status ? eq(conferences.status, status) : undefined)
+      .where(
+        and(
+          status ? eq(conferences.status, status) : undefined,
+          cfpState ? eq(cfps.status, cfpState) : undefined,
+        ),
+      )
       .orderBy(desc(conferences.createdAt));
   }
 

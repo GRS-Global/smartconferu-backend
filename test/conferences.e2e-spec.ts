@@ -347,7 +347,7 @@ describe('Conferences, CFP and team', () => {
         .expect(422);
     });
 
-    it('publishes, appears in the directory, then closes', async () => {
+    it('goes live only once a Super Admin approves it, appears in the directory, then closes and reopens', async () => {
       const chair = await person();
       const id = await liveConference(chair);
 
@@ -366,13 +366,38 @@ describe('Conferences, CFP and team', () => {
       let directory = await http().get(api('/public/cfps')).expect(200);
       expect(directory.body).toEqual([]);
 
-      const published = await as(chair.token)
+      // "Publish" sends it to the Super Admin: it is not live yet.
+      const sent = await as(chair.token)
         .post(`/conferences/${id}/cfp/publish`)
         .expect(200);
-      expect(published.body).toMatchObject({
-        status: 'published',
+      expect(sent.body).toMatchObject({
+        status: 'in_review',
         content: { intro: 'Submit your papers' },
+        adminNote: null,
       });
+      expect(sent.body.submittedAt).not.toBeNull();
+      // Sending it again changes nothing.
+      await as(chair.token).post(`/conferences/${id}/cfp/publish`).expect(200);
+      page = await http().get(api('/public/conferences/isbm2027')).expect(200);
+      expect(page.body.cfpStatus).not.toBe('published');
+      directory = await http().get(api('/public/cfps')).expect(200);
+      expect(directory.body).toEqual([]);
+
+      // The Super Admin sees it waiting and approves it.
+      const admin = await superAdmin();
+      const waiting = await as(admin.token).get('/admin/cfps').expect(200);
+      expect(waiting.body.map((c: { id: string }) => c.id)).toEqual([id]);
+      await as(admin.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, { approve: true })
+        .expect(204);
+      await as(admin.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, { approve: true })
+        .expect(422); // already decided
+
+      const live = await as(chair.token)
+        .get(`/conferences/${id}/cfp`)
+        .expect(200);
+      expect(live.body.status).toBe('published');
       page = await http().get(api('/public/conferences/isbm2027')).expect(200);
       expect(page.body).toMatchObject({
         slug: 'isbm2027',
@@ -386,6 +411,111 @@ describe('Conferences, CFP and team', () => {
       await as(chair.token).post(`/conferences/${id}/cfp/close`).expect(422);
       directory = await http().get(api('/public/cfps')).expect(200);
       expect(directory.body).toEqual([]);
+
+      // It was approved before: opening it again needs no new approval.
+      const reopened = await as(chair.token)
+        .post(`/conferences/${id}/cfp/publish`)
+        .expect(200);
+      expect(reopened.body.status).toBe('published');
+    });
+
+    it('can be declined with a note, edited and sent again; the chairs are told each time', async () => {
+      const chair = await person();
+      const id = await liveConference(chair);
+      const admin = await superAdmin();
+      await t.sendQueuedEmails();
+      t.outbox().length = 0;
+
+      await as(chair.token).post(`/conferences/${id}/cfp/publish`).expect(200);
+      // The Super Admin is told (bell and email).
+      const bell = await t.db.query(
+        "select title from notifications where kind = 'cfp_review' and user_id = $1",
+        [admin.id],
+      );
+      expect(bell.rows).toEqual([
+        { title: 'Call for Papers waiting for approval' },
+      ]);
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .some(
+            (m) =>
+              m.to === admin.email &&
+              /Call for Papers to approve/.test(m.subject),
+          ),
+      ).toBe(true);
+
+      await as(admin.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, {
+          approve: false,
+          note: 'Please add the submission dates.',
+        })
+        .expect(204);
+      const declined = await as(chair.token)
+        .get(`/conferences/${id}/cfp`)
+        .expect(200);
+      expect(declined.body).toMatchObject({
+        status: 'rejected',
+        adminNote: 'Please add the submission dates.',
+      });
+      const told = await t.db.query(
+        "select title, body from notifications where kind = 'conference_decision' and title like 'Call for Papers%' and user_id = $1",
+        [chair.id],
+      );
+      expect(told.rows).toEqual([
+        {
+          title: 'Call for Papers not approved',
+          body: 'Please add the submission dates.',
+        },
+      ]);
+      // Nobody can submit papers while it is not live.
+      const author = await person();
+      await as(author.token)
+        .post(`/conferences/${id}/submissions`, {
+          title: 'A paper',
+          abstract: 'Words.',
+          authors: [{ name: 'A', email: author.email, corresponding: true }],
+        })
+        .expect(422);
+
+      // The chair edits it and sends it again: the note is cleared and it waits again.
+      await as(chair.token)
+        .patch(`/conferences/${id}/cfp`, { content: { intro: 'Dates added' } })
+        .expect(200);
+      const again = await as(chair.token)
+        .post(`/conferences/${id}/cfp/publish`)
+        .expect(200);
+      expect(again.body).toMatchObject({
+        status: 'in_review',
+        adminNote: null,
+      });
+      await as(admin.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, { approve: true })
+        .expect(204);
+      await as(author.token)
+        .post(`/conferences/${id}/submissions`, {
+          title: 'A paper',
+          abstract: 'Words.',
+          authors: [{ name: 'A', email: author.email, corresponding: true }],
+        })
+        .expect(201);
+    });
+
+    it('is decided only by a Super Admin, and only while it waits', async () => {
+      const chair = await person();
+      const id = await liveConference(chair);
+      await as(chair.token).post(`/conferences/${id}/cfp/publish`).expect(200);
+      await as(chair.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, { approve: true })
+        .expect(403);
+      await as(chair.token).get('/admin/cfps').expect(403);
+      const admin = await superAdmin();
+      const other = await liveConference(await person());
+      // A CFP that was never sent cannot be decided.
+      await as(admin.token)
+        .post(`/admin/conferences/${other}/cfp/decision`, { approve: true })
+        .expect(422);
     });
 
     it('answers an archived conference’s link with a notice, others with 404', async () => {
@@ -413,9 +543,10 @@ describe('Conferences, CFP and team', () => {
          ($1, $2, 'cfp_manager', 'active'), ($1, $3, 'reviewer', 'active')`,
         [id, manager.id, reviewer.id],
       );
-      await as(manager.token)
+      const sent = await as(manager.token)
         .post(`/conferences/${id}/cfp/publish`)
         .expect(200);
+      expect(sent.body.status).toBe('in_review');
       await as(reviewer.token)
         .patch(`/conferences/${id}/cfp`, { content: {} })
         .expect(403);
