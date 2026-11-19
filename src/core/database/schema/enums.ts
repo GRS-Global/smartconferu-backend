@@ -95,3 +95,10 @@ export const assignmentStatus = pgEnum('assignment_status', [
 ]);
 
 export const reviewStatus = pgEnum('review_status', ['draft', 'submitted']);
+
+/** A reviewer's "Ask for more time": waits for a chair, then is approved (the due date moves) or declined. */
+export const extensionStatus = pgEnum('extension_status', [
+  'pending',
+  'approved',
+  'declined',
+]);

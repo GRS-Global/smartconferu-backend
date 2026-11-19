@@ -41,6 +41,8 @@ describe('AI features (against a fake Claude and Voyage)', () => {
   }
 
   const as = (token: string) => ({
+    get: (path: string) =>
+      http().get(api(path)).set('Authorization', `Bearer ${token}`),
     post: (path: string, body?: object) =>
       http()
         .post(api(path))
@@ -253,6 +255,115 @@ describe('AI features (against a fake Claude and Voyage)', () => {
       .post(`/submissions/${submissionId}/ai/chat`, { question: 'Is it good?' })
       .expect(403);
     expect((await usage('paper_chat')).length).toBe(2); // embedding + answer
+  });
+
+  it("writes a paper's summary when a reviewer is given the paper, for its chairs and reviewers to read", async () => {
+    const { chair, author, conferenceId, submissionId } = await paperWithPdf();
+    fake.answer = () => digest;
+    const summaryUrl = `/submissions/${submissionId}/ai/summary`;
+    const before = await as(chair.token).get(summaryUrl).expect(200);
+    expect(before.body).toMatchObject({ status: 'none', summary: null });
+
+    // A reviewer on the committee who has no paper yet cannot read it.
+    const reviewer = await person();
+    const member = await as(chair.token)
+      .post(`/conferences/${conferenceId}/members`, {
+        email: reviewer.email,
+        role: 'reviewer',
+      })
+      .expect(201);
+    await as(reviewer.token)
+      .post(`/invitations/${member.body.member.id}/accept`)
+      .expect(200);
+    expect([403, 404]).toContain(
+      (await as(reviewer.token).get(summaryUrl)).status,
+    );
+
+    // Giving the paper to the reviewer writes the summary in the background.
+    await as(chair.token)
+      .post(`/submissions/${submissionId}/assignments`, {
+        memberIds: [member.body.member.id],
+      })
+      .expect(200);
+    for (let i = 0; i < 50; i += 1) {
+      const rows = await t.db.query(
+        'select 1 from paper_digests where submission_id = $1',
+        [submissionId],
+      );
+      if (rows.rows.length) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const read = await as(reviewer.token).get(summaryUrl).expect(200);
+    expect(read.body).toMatchObject({
+      status: 'ready',
+      summary: digest.summary,
+      claims: digest.claims,
+      methods: digest.methods,
+      datasets: digest.datasets,
+      limitations: [],
+      upToDate: true,
+    });
+    expect(read.body.updatedAt).not.toBeNull();
+    await as(chair.token).get(summaryUrl).expect(200);
+    // Authors do not read it; and it was written without the embeddings the chat needs.
+    expect([403, 404]).toContain(
+      (await as(author.token).get(summaryUrl)).status,
+    );
+    const chunks = await t.db.query(
+      'select count(*)::int as n from paper_chunks where submission_id = $1',
+      [submissionId],
+    );
+    expect(chunks.rows[0]).toEqual({ n: 0 });
+    expect((await usage('paper_digest')).length).toBe(1);
+
+    // Assigning another reviewer does not pay for it again.
+    const second = await person();
+    const m2 = await as(chair.token)
+      .post(`/conferences/${conferenceId}/members`, {
+        email: second.email,
+        role: 'reviewer',
+      })
+      .expect(201);
+    await as(second.token)
+      .post(`/invitations/${m2.body.member.id}/accept`)
+      .expect(200);
+    await as(chair.token)
+      .post(`/submissions/${submissionId}/assignments`, {
+        memberIds: [m2.body.member.id],
+      })
+      .expect(200);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect((await usage('paper_digest')).length).toBe(1);
+  });
+
+  it('writes the summary on request, and says so when the paper cannot be read', async () => {
+    const { chair, author, submissionId } = await paperWithPdf();
+    fake.answer = () => digest;
+    const written = await as(chair.token)
+      .post(`/submissions/${submissionId}/ai/summary`)
+      .expect(200);
+    expect(written.body).toMatchObject({
+      status: 'ready',
+      summary: digest.summary,
+    });
+    // Asked again, it is read from the database.
+    await as(chair.token)
+      .post(`/submissions/${submissionId}/ai/summary`)
+      .expect(200);
+    expect((await usage('paper_digest')).length).toBe(1);
+    await as(author.token)
+      .post(`/submissions/${submissionId}/ai/summary`)
+      .expect(403);
+
+    // A scan has no text to summarise.
+    const scan = await paperWithPdf();
+    await t.db.query(
+      "update submission_files set file_name = 'paper.docx' where submission_id = $1",
+      [scan.submissionId],
+    );
+    await as(scan.chair.token)
+      .post(`/submissions/${scan.submissionId}/ai/summary`)
+      .expect(422);
   });
 
   it('prepares papers that were missed in the background job', async () => {

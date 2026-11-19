@@ -5,6 +5,7 @@ import { DatabaseService } from '../../core/database/database.service.js';
 import type { Executor, Tx } from '../../core/database/database.types.js';
 import { EmailQueueService } from '../../core/email/email-queue.service.js';
 import { EmailRecipientsService } from '../../core/email/email-recipients.service.js';
+import { stripTags } from '../../core/email/email-render.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
@@ -14,11 +15,16 @@ import type {
   SubmissionAccess,
 } from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
+import { FileStorage } from '../../core/storage/file-storage.js';
 import type {
   AuthorDto,
+  CountResponse,
   CreateSubmissionDto,
   DuplicateResponse,
   EmailsQueuedResponse,
+  FixRequestDto,
+  PaperEmailDto,
+  PaperEmailQueuedResponse,
   SubmissionResponse,
   UpdateDetailsDto,
 } from './dto/submission.dto.js';
@@ -74,6 +80,7 @@ export class SubmissionsService {
     private readonly recipients: EmailRecipientsService,
     private readonly paperEmails: SubmissionEmailsService,
     private readonly audit: AuditService,
+    private readonly storage: FileStorage,
   ) {}
 
   // Submitting --------------------------------------------------------------------------------
@@ -455,6 +462,230 @@ export class SubmissionsService {
       );
       return this.view(tx, user, submissionId);
     });
+  }
+
+  // Chairs -----------------------------------------------------------------------------------
+
+  /**
+   * "Ask author to fix": the chair names a fixable problem and a date. It stays on the paper (the
+   * authors see it on the paper page) until a new version is uploaded; the authors are told by bell
+   * and email.
+   */
+  async requestFix(
+    user: AuthUser,
+    submissionId: string,
+    dto: FixRequestDto,
+    client: ClientInfo,
+  ): Promise<SubmissionResponse> {
+    return this.database.transaction(async (tx) => {
+      const { access, submission } = await this.lock(tx, user, submissionId);
+      if (!rules.canDecide(access)) {
+        throw AppException.forbidden(
+          'Only a chair of this conference can ask authors to fix a paper.',
+        );
+      }
+      if (submission.status === 'withdrawn') {
+        throw AppException.businessRule('This paper has been withdrawn.');
+      }
+      if (dto.fixBy < new Date().toISOString().slice(0, 10)) {
+        throw AppException.businessRule(
+          'Choose a date that is not in the past.',
+        );
+      }
+      const at = new Date().toISOString();
+      await this.submissions.update(tx, submissionId, {
+        details: {
+          ...(submission.details as Record<string, unknown>),
+          fixRequest: { issue: dto.issue, fixBy: dto.fixBy, at, by: user.id },
+        },
+      });
+      const info = (await this.submissions.conferenceInfo(
+        tx,
+        submission.conferenceId,
+      ))!;
+      const ctx = await this.context(tx, user, info, submissionId);
+      const pid = paperId(info.acronym, submission.paperNo);
+      await this.notifications.notify(
+        tx,
+        await this.submissions.linkedUserIds(tx, submissionId),
+        {
+          kind: 'fix_requested',
+          title: `Please fix ${pid} by ${dto.fixBy}`,
+          body: dto.issue,
+          conferenceId: info.id,
+          submissionId,
+          link: `/submissions/${pid}`,
+        },
+      );
+      await this.emails.enqueue(
+        tx,
+        'paper_fix_requested',
+        await this.paperEmails.fixRequested(tx, ctx, {
+          issue: dto.issue,
+          fixBy: dto.fixBy,
+        }),
+        { sentBy: user.id },
+      );
+      await this.record(
+        tx,
+        user,
+        client,
+        'submission.fix_requested',
+        submissionId,
+        {
+          fixBy: dto.fixBy,
+        },
+      );
+      return this.view(tx, user, submissionId);
+    });
+  }
+
+  /**
+   * The chair writes to some of a paper's authors ("Email authors"). Only addresses of this paper's
+   * authors (or its submitter) are accepted; each person gets one email, placeholders filled in.
+   */
+  async emailAuthors(
+    user: AuthUser,
+    submissionId: string,
+    dto: PaperEmailDto,
+    client: ClientInfo,
+  ): Promise<PaperEmailQueuedResponse> {
+    if (!stripTags(dto.body)) {
+      throw AppException.validation('The email needs a message.');
+    }
+    return this.database.transaction(async (tx) => {
+      const { access, submission } = await this.lock(tx, user, submissionId);
+      if (!rules.canDecide(access)) {
+        throw AppException.forbidden(
+          'Only a chair of this conference can email the authors of a paper.',
+        );
+      }
+      const info = (await this.submissions.conferenceInfo(
+        tx,
+        submission.conferenceId,
+      ))!;
+      const ctx = await this.context(tx, user, info, submissionId);
+      const known = new Map<string, { email: string; name: string }>();
+      for (const a of ctx.authors) {
+        known.set(a.email.trim().toLowerCase(), {
+          email: a.email.trim(),
+          name: a.name,
+        });
+      }
+      for (const a of await this.paperEmails.authorUpdates(tx, ctx)) {
+        known.set(a.email.trim().toLowerCase(), a);
+      }
+      const wanted = [...new Set(dto.to.map((e) => e.trim().toLowerCase()))];
+      const people = wanted.flatMap((e) => known.get(e) ?? []);
+      if (people.length !== wanted.length) {
+        throw AppException.businessRule(
+          'You can only email authors of this paper.',
+        );
+      }
+      const result = await this.emails.enqueue(
+        tx,
+        'paper_message',
+        this.paperEmails.message(ctx, people, dto),
+        { sentBy: user.id },
+      );
+      await this.record(
+        tx,
+        user,
+        client,
+        'submission.authors_emailed',
+        submissionId,
+        { recipients: people.length },
+      );
+      return { queued: result.queued, skipped: result.skipped };
+    });
+  }
+
+  /** Moves papers to another track (a chair of their conference). */
+  async changeTrack(
+    user: AuthUser,
+    conferenceId: string,
+    ids: readonly string[],
+    track: string,
+    client: ClientInfo,
+  ): Promise<CountResponse> {
+    return this.database.transaction(async (tx) => {
+      const access = await this.access.requireConference(
+        user,
+        conferenceId,
+        tx,
+      );
+      if (!rules.isChair(access)) {
+        throw AppException.forbidden(
+          'Only a chair of this conference can change tracks.',
+        );
+      }
+      const found = await this.submissions.idsInConference(
+        tx,
+        access.conferenceId,
+        ids,
+      );
+      await this.submissions.setTrack(tx, found, track);
+      await this.audit.record(
+        {
+          action: 'submission.track_changed',
+          actorId: user.id,
+          entityType: 'conference',
+          entityId: access.conferenceId,
+          client,
+          data: { ids: found, track },
+        },
+        tx,
+      );
+      return { count: found.length };
+    });
+  }
+
+  /**
+   * Deletes papers for good with their authors, files, assignments and reviews (a chair of their
+   * conference). The stored files go once the deletion is saved.
+   */
+  async deleteMany(
+    user: AuthUser,
+    conferenceId: string,
+    ids: readonly string[],
+    client: ClientInfo,
+  ): Promise<CountResponse> {
+    const done = await this.database.transaction(async (tx) => {
+      const access = await this.access.requireConference(
+        user,
+        conferenceId,
+        tx,
+      );
+      if (!rules.isChair(access)) {
+        throw AppException.forbidden(
+          'Only a chair of this conference can delete papers.',
+        );
+      }
+      const found = await this.submissions.idsInConference(
+        tx,
+        access.conferenceId,
+        ids,
+      );
+      await this.submissions.deleteMany(tx, found);
+      await this.audit.record(
+        {
+          action: 'submission.deleted',
+          actorId: user.id,
+          entityType: 'conference',
+          entityId: access.conferenceId,
+          client,
+          data: { ids: found },
+        },
+        tx,
+      );
+      return { conferenceId: access.conferenceId, ids: found };
+    });
+    for (const id of done.ids) {
+      await this.storage
+        .deleteFolder(`${done.conferenceId}/${id}/`)
+        .catch(() => undefined);
+    }
+    return { count: done.ids.length };
   }
 
   // Helpers -----------------------------------------------------------------------------------

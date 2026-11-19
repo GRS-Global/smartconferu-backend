@@ -176,9 +176,7 @@ export class ReviewRemindersService {
             pending_list: `<ul>${pending}</ul>`,
             review_deadline: emailDate(soonest.dueDay),
             days_left: daysLabel(soonest.daysLeft),
-            review_link: this.recipients.link(
-              `/prototype/reviewer/${conf.slug}`,
-            ),
+            review_link: this.recipients.link(`/reviewer/${conf.slug}`),
           },
         });
         await this.notifications.notify(tx, [reviewerId], {
@@ -189,7 +187,7 @@ export class ReviewRemindersService {
               : `${daysLabel(soonest.daysLeft)} left to review — ${conf.acronym}`,
           body: `${list.length} review${list.length === 1 ? ' is' : 's are'} still waiting. Due ${emailDate(soonest.dueDay)}.`,
           conferenceId: conf.id,
-          link: `/prototype/reviewer/${conf.slug}`,
+          link: `/reviewer/${conf.slug}`,
         });
       }
       if (messages.length > 0) {

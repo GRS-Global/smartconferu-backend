@@ -453,6 +453,203 @@ describe('Peer review and decisions', () => {
       });
     });
 
+    it('lets a reviewer ask for more time, a chair answers, and both are told', async () => {
+      const s = await setup();
+      // The chair gave this reviewer until 30 April 2099.
+      const res = await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/assignments`, {
+          memberIds: [s.reviewerMember],
+          dueDate: '2099-04-30',
+        })
+        .expect(200);
+      const assignmentId = res.body.assignments[0].id as string;
+      const ask = (token: string, body: object) =>
+        as(token).post(`/assignments/${assignmentId}/extension-request`, body);
+
+      // Nothing asked yet.
+      const before = await as(s.reviewer.token)
+        .get('/me/review-assignments')
+        .expect(200);
+      expect(before.body[0].extension).toBeNull();
+
+      // The date must be after the current deadline, and not in the past.
+      await ask(s.reviewer.token, { date: '2099-04-30' }).expect(422);
+      await ask(s.reviewer.token, { date: '2001-01-01' }).expect(422);
+      await ask(s.reviewer.token, { date: 'tomorrow' }).expect(400);
+      // Only the assignment's own reviewer may ask.
+      await ask(s.second.token, { date: '2099-05-10' }).expect(404);
+      await ask(s.author.token, { date: '2099-05-10' }).expect(404);
+
+      const asked = await ask(s.reviewer.token, {
+        date: '2099-05-10',
+        reason: 'Travelling for a week.',
+      }).expect(200);
+      expect(asked.body.extension).toMatchObject({
+        date: '2099-05-10',
+        reason: 'Travelling for a week.',
+        status: 'pending',
+        note: null,
+        decidedAt: null,
+      });
+      expect(asked.body.dueAt).toMatch(/^2099-04-30/); // unchanged until a chair approves
+      // One request may wait at a time.
+      const again = await ask(s.reviewer.token, { date: '2099-05-12' }).expect(
+        422,
+      );
+      expect(again.body.message).toMatch(/already have a request/);
+
+      // The chair is told (bell and email) and sees the request on the review board.
+      expect(await bell(s.chair.id)).toContain('extension_request');
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .some(
+            (m) =>
+              m.to === s.chair.email && /More time asked for/.test(m.subject),
+          ),
+      ).toBe(true);
+      const board = await as(s.chair.token)
+        .get(`/conferences/${s.conferenceId}/review-board`)
+        .expect(200);
+      const onBoard = board.body.papers
+        .flatMap((p: { assignments: { id: string }[] }) => p.assignments)
+        .find((a: { id: string }) => a.id === assignmentId);
+      expect(onBoard.extension).toMatchObject({
+        status: 'pending',
+        date: '2099-05-10',
+      });
+      const extensionId = onBoard.extension.id as string;
+
+      // Only a chair answers; the reviewer cannot approve their own request.
+      const decide = (token: string, body: object) =>
+        as(token).post(`/extension-requests/${extensionId}/decision`, body);
+      await decide(s.reviewer.token, { approve: true }).expect(404);
+      await decide(s.author.token, { approve: true }).expect(404);
+      await as(s.chair.token)
+        .post(
+          '/extension-requests/00000000-0000-4000-8000-000000000000/decision',
+          { approve: true },
+        )
+        .expect(404);
+
+      // Declined: the deadline stays, the reviewer is told with the note, and may ask again.
+      const declined = await decide(s.chair.token, {
+        approve: false,
+        note: 'The committee meets on 5 May.',
+      }).expect(200);
+      expect(declined.body.extension).toMatchObject({
+        status: 'declined',
+        note: 'The committee meets on 5 May.',
+      });
+      expect(declined.body.dueAt).toMatch(/^2099-04-30/);
+      await decide(s.chair.token, { approve: true }).expect(422); // already answered
+      expect(await bell(s.reviewer.id)).toContain('extension_decision');
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .some(
+            (m) =>
+              m.to === s.reviewer.email &&
+              /More time for .* was not approved/.test(m.subject),
+          ),
+      ).toBe(true);
+
+      // A second request, approved: the deadline moves to the date asked for.
+      await ask(s.reviewer.token, { date: '2099-05-03' }).expect(200);
+      const second = await as(s.reviewer.token)
+        .get('/me/review-assignments')
+        .expect(200);
+      const secondId = second.body[0].extension.id as string;
+      expect(second.body[0].extension.status).toBe('pending');
+      const approved = await as(s.chair.token)
+        .post(`/extension-requests/${secondId}/decision`, { approve: true })
+        .expect(200);
+      expect(approved.body.extension.status).toBe('approved');
+      expect(approved.body.dueAt).toMatch(/^2099-05-03/);
+      const mine = await as(s.reviewer.token)
+        .get('/me/review-assignments')
+        .expect(200);
+      expect(mine.body[0].dueAt).toMatch(/^2099-05-03/);
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .some(
+            (m) =>
+              m.to === s.reviewer.email &&
+              /New review deadline for/.test(m.subject),
+          ),
+      ).toBe(true);
+
+      // The new deadline counts for the next request.
+      await ask(s.reviewer.token, { date: '2099-05-03' }).expect(422);
+
+      // Once the review is sent there is nothing left to move.
+      await as(s.reviewer.token)
+        .put(`/assignments/${assignmentId}/review`, { ...form, submit: true })
+        .expect(200);
+      await ask(s.reviewer.token, { date: '2099-06-01' }).expect(422);
+    });
+
+    it('lets a chair remind or write to a reviewer, who is told by bell and email', async () => {
+      const s = await setup();
+      const res = await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/assignments`, {
+          memberIds: [s.reviewerMember],
+          dueDate: '2099-04-30',
+        })
+        .expect(200);
+      const assignmentId = res.body.assignments[0].id as string;
+      t.outbox().length = 0;
+
+      await as(s.chair.token)
+        .post(`/assignments/${assignmentId}/remind`, { note: 'Please hurry' })
+        .expect(204);
+      await as(s.chair.token)
+        .post(`/assignments/${assignmentId}/message`, {
+          message: 'Can you focus on the proofs?',
+        })
+        .expect(204);
+      expect(await bell(s.reviewer.id)).toEqual(
+        expect.arrayContaining(['review_reminder', 'reviewer_message']),
+      );
+      await t.sendQueuedEmails();
+      const mails = t.outbox().filter((m) => m.to === s.reviewer.email);
+      expect(mails.some((m) => /Reminder: your review of/.test(m.subject))).toBe(
+        true,
+      );
+      expect(mails.some((m) => /Message about .* from the chair/.test(m.subject))).toBe(
+        true,
+      );
+      const logged = await t.db.query<{ template_key: string }>(
+        `select template_key from email_log where lower(to_email) = lower($1)
+          and template_key in ('reviewReminderFromChair', 'reviewerMessage')`,
+        [s.reviewer.email],
+      );
+      expect(logged.rows).toHaveLength(2);
+
+      // An empty message, outsiders and authors are refused.
+      await as(s.chair.token)
+        .post(`/assignments/${assignmentId}/message`, { message: '  ' })
+        .expect(400);
+      await as(s.author.token)
+        .post(`/assignments/${assignmentId}/remind`, {})
+        .expect(404);
+      await as(s.reviewer.token)
+        .post(`/assignments/${assignmentId}/remind`, {})
+        .expect(404);
+
+      // Once the review is sent there is nothing left to remind.
+      await as(s.reviewer.token)
+        .put(`/assignments/${assignmentId}/review`, { ...form, submit: true })
+        .expect(200);
+      await as(s.chair.token)
+        .post(`/assignments/${assignmentId}/remind`, {})
+        .expect(422);
+    });
+
     it('keeps reviews from authors and other reviewers', async () => {
       const s = await assigned();
       await as(s.author.token)

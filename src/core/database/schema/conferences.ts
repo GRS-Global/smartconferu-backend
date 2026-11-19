@@ -188,3 +188,39 @@ export const conferenceDeletionRequests = pgTable(
     ),
   ],
 );
+
+/**
+ * A chair's "Request extension" of the conference's license date (Conference Details › License
+ * expiry). A Super Admin approves (the license then runs until `new_expiry`, kept in
+ * conferences.details.licenseExpiry) or declines; the chair can withdraw a request that waits.
+ */
+export const licenseRequests = pgTable(
+  'license_requests',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    conferenceId: uuid('conference_id')
+      .notNull()
+      .references(() => conferences.id, { onDelete: 'cascade' }),
+    requestedBy: uuid('requested_by')
+      .notNull()
+      .references(() => users.id),
+    requestedDate: date('requested_date', { mode: 'string' }).notNull(),
+    reason: text(),
+    status: text().notNull().default('pending'),
+    decisionReason: text('decision_reason'),
+    newExpiry: date('new_expiry', { mode: 'string' }),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: timestamptz('decided_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('license_requests_conference_idx').on(t.conferenceId, t.createdAt),
+    uniqueIndex('license_requests_one_open')
+      .on(t.conferenceId)
+      .where(sql`${t.status} = 'pending'`),
+    check(
+      'license_requests_status_check',
+      sql`${t.status} in ('pending', 'approved', 'declined', 'withdrawn')`,
+    ),
+  ],
+);

@@ -131,6 +131,87 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
         .expect((r) => expect(r.body).toEqual({ updated: 4, unread: 0 }));
       await as(me.token).get('/me/notifications?cursor=nonsense').expect(400);
     });
+
+    it('puts a notification back to unread, and names its conference and paper', async () => {
+      const { chair, conferenceId } = await conference();
+      const author = await person();
+      const paper = await as(author.token)
+        .post(`/conferences/${conferenceId}/submissions`, {
+          title: 'Graph networks for protein folding',
+          abstract: 'We show that graph networks fold proteins.',
+          authors: [
+            { name: 'Ada Author', email: author.email, corresponding: true },
+          ],
+        })
+        .expect(201);
+      await t.db.query(
+        `insert into notifications (user_id, kind, title, conference_id, submission_id)
+         values ($1, 'test', 'About a paper', $2, $3)`,
+        [chair.id, conferenceId, paper.body.id],
+      );
+      const list = await as(chair.token).get('/me/notifications').expect(200);
+      const note = list.body.data.find(
+        (n: { title: string }) => n.title === 'About a paper',
+      );
+      expect(note).toMatchObject({
+        conferenceAcronym: 'ICX 2027',
+        paperLabel: 'ICX-1',
+      });
+      expect(note.conferenceSlug).toEqual(expect.any(String));
+
+      await as(chair.token)
+        .post('/me/notifications/read', { ids: [note.id] })
+        .expect(200);
+      const back = await as(chair.token)
+        .post('/me/notifications/unread', { ids: [note.id] })
+        .expect(200);
+      expect(back.body.updated).toBe(1);
+      // someone else's id, and one that is not read, change nothing
+      const again = await as(chair.token)
+        .post('/me/notifications/unread', { ids: [note.id] })
+        .expect(200);
+      expect(again.body.updated).toBe(0);
+      const theirs = await as(author.token)
+        .post('/me/notifications/unread', { ids: [note.id] })
+        .expect(200);
+      expect(theirs.body.updated).toBe(0);
+      await as(chair.token)
+        .post('/me/notifications/unread', { ids: ['nope'] })
+        .expect(400);
+    });
+  });
+
+  describe('my emails', () => {
+    it('lists the emails sent to my own address, and nobody else’s', async () => {
+      const { chair, conferenceId } = await conference();
+      const author = await person();
+      await as(author.token)
+        .post(`/conferences/${conferenceId}/submissions`, {
+          title: 'Graph networks for protein folding',
+          abstract: 'We show that graph networks fold proteins.',
+          authors: [
+            { name: 'Ada Author', email: author.email, corresponding: true },
+          ],
+        })
+        .expect(201);
+      await t.sendQueuedEmails();
+
+      const mine = await as(author.token).get('/me/emails').expect(200);
+      expect(mine.body.length).toBeGreaterThan(0);
+      expect(mine.body[0]).toMatchObject({
+        conferenceAcronym: 'ICX 2027',
+        paperLabel: 'ICX-1',
+      });
+      expect(mine.body[0].subject).toEqual(expect.any(String));
+      expect(mine.body[0].body).toContain('<');
+      // the chair's own list holds the chair's emails, not the author's
+      const chairs = await as(chair.token).get('/me/emails').expect(200);
+      expect(
+        chairs.body.every(
+          (e: { subject: string }) => !/Submission received/i.test(e.subject),
+        ),
+      ).toBe(true);
+    });
   });
 
   describe('conference email templates', () => {

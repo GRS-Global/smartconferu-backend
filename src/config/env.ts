@@ -92,6 +92,12 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   /** e.g. "Smartconferu <no-reply@smartconferu.com>" */
   EMAIL_FROM: z.string().default('Smartconferu <no-reply@localhost>'),
+  /**
+   * Public URL of the logo shown at the top of emails. Empty: the app's own /smartconferu-lockup.png when
+   * APP_URL is a public address; on localhost / a private address the name is written out instead (a mail
+   * client cannot load an image from your computer).
+   */
+  EMAIL_LOGO_URL: z.url().optional(),
   /** Send the email queue from this process (off in tests, which send it on demand). */
   EMAIL_QUEUE_ENABLED: bool.default(true),
   /** How often the queue is checked for emails to send. */

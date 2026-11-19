@@ -183,6 +183,12 @@ export class SubmissionFilesService {
 
         let stored: AutoCheck | null = null;
         if (!supplementary) {
+          // The corrected file answers an open "Ask author to fix".
+          const { fixRequest: _answered, ...details } =
+            submission.details as Record<string, unknown>;
+          if (_answered !== undefined) {
+            await this.submissions.update(tx, submissionId, { details });
+          }
           // The full paper is in: under review (the "no decision" stage).
           if (submission.outcome === 'upload_pending') {
             const stage = await this.submissions.decisionTypeFor(

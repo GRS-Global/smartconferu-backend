@@ -100,6 +100,38 @@ export class SubmissionsRepository {
     return row;
   }
 
+  /** The papers among `ids` that belong to the conference (drafts are not papers yet). */
+  async idsInConference(
+    tx: Tx,
+    conferenceId: string,
+    ids: readonly string[],
+  ): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const rows = await tx
+      .select({ id: submissions.id })
+      .from(submissions)
+      .where(
+        and(
+          eq(submissions.conferenceId, conferenceId),
+          inArray(submissions.id, [...ids]),
+        ),
+      );
+    return rows.map((r) => r.id);
+  }
+
+  async setTrack(tx: Tx, ids: readonly string[], track: string): Promise<void> {
+    await tx
+      .update(submissions)
+      .set({
+        details: sql`${submissions.details} || ${JSON.stringify({ track })}::jsonb`,
+      })
+      .where(inArray(submissions.id, [...ids]));
+  }
+
+  async deleteMany(tx: Tx, ids: readonly string[]): Promise<void> {
+    await tx.delete(submissions).where(inArray(submissions.id, [...ids]));
+  }
+
   async update(
     tx: Tx,
     submissionId: string,

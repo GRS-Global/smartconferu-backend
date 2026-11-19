@@ -171,7 +171,7 @@ export class ConferenceEmailsService {
     }
     const hi = `<p>Dear ${escapeHtml(firstName(chair.name, chair.email))},</p>`;
     const dashboard = this.recipients.link(
-      `/prototype/conference/${conference.slug}/chair`,
+      `/conference/${conference.slug}/chair`,
     );
     const acronym = escapeHtml(conference.acronym);
     await this.queue.enqueue(
@@ -246,7 +246,7 @@ export class ConferenceEmailsService {
         values: {
           first_name: firstName(chair.name, chair.email),
           dashboard_link: this.recipients.link(
-            `/prototype/conference/${conference.slug}/chair`,
+            `/conference/${conference.slug}/chair`,
           ),
         },
       },
@@ -282,9 +282,9 @@ export class ConferenceEmailsService {
             ? `until ${emailDate(conference.reviewDeadline)}`
             : 'dates to be announced by the chair',
           activate_link: this.recipients.link(
-            account ? '/prototype/dashboard' : '/prototype/register',
+            account ? '/dashboard' : '/register',
           ),
-          login_link: this.recipients.link('/prototype/login'),
+          login_link: this.recipients.link('/login'),
         },
       },
     ];
@@ -357,9 +357,7 @@ export class ConferenceEmailsService {
             emailDate(due) ||
             emailDate(conference.reviewDeadline) ||
             'the date the chair set',
-          review_link: this.recipients.link(
-            `/prototype/reviewer/${conference.slug}`,
-          ),
+          review_link: this.recipients.link(`/reviewer/${conference.slug}`),
         },
       });
     }

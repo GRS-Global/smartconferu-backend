@@ -551,8 +551,8 @@ export class CommunicationsService {
                 ? details.presentationType
                 : '',
             submission_link: pid
-              ? this.recipients.link(`/prototype/submissions/${pid}/author`)
-              : this.recipients.link('/prototype/'),
+              ? this.recipients.link(`/submissions/${pid}/author`)
+              : this.recipients.link('/'),
           };
           return {
             key: 'custom',

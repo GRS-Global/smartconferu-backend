@@ -220,3 +220,37 @@ export class PaperChatDto {
   @Type(() => ChatTurnDto)
   history?: ChatTurnDto[];
 }
+
+export class PaperSummaryResponse {
+  @ApiProperty({
+    enum: ['ready', 'none'],
+    description: "'none' until the summary has been written.",
+  })
+  status: 'ready' | 'none';
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      "A neutral summary of the paper (150-300 words), without the authors' names.",
+  })
+  summary: string | null;
+  @ApiProperty({
+    type: [String],
+    description: 'Main claims, as the authors state them.',
+  })
+  claims: string[];
+  @ApiProperty({ type: [String] }) methods: string[];
+  @ApiProperty({ type: [String] }) datasets: string[];
+  @ApiProperty({
+    type: [String],
+    description: 'Limitations the authors state themselves.',
+  })
+  limitations: string[];
+  @ApiProperty({ nullable: true, type: String }) model: string | null;
+  @ApiProperty({ nullable: true, type: String, format: 'date-time' })
+  updatedAt: string | null;
+  @ApiProperty({
+    description: "The summary is for the paper's latest uploaded version.",
+  })
+  upToDate: boolean;
+}

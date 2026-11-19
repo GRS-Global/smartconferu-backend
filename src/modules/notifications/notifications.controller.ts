@@ -24,11 +24,18 @@ import {
   IsOptional,
   IsUUID,
 } from 'class-validator';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { DatabaseService } from '../../core/database/database.service.js';
-import { notifications } from '../../core/database/schema/index.js';
+import {
+  conferences,
+  emailLog,
+  notifications,
+  submissions,
+  users,
+} from '../../core/database/schema/index.js';
+import { paperId } from '../submissions/submission.mapper.js';
 import { toNotificationView } from '../../core/notifications/notification.view.js';
 import {
   decodeCursor,
@@ -59,7 +66,31 @@ export class MarkReadDto {
   ids?: string[];
 }
 
+export class MarkUnreadDto {
+  @ApiProperty({ type: [String], format: 'uuid' })
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  ids: string[];
+}
+
 export class NotificationResponse {
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      "The conference's URL id, when it is about one you can still see.",
+  })
+  conferenceSlug: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  conferenceAcronym: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    example: 'ICX-3',
+    description: 'The paper as people see it, when it is about one.',
+  })
+  paperLabel: string | null;
   @ApiProperty({ format: 'uuid' }) id: string;
   @ApiProperty({ example: 'review_assigned' }) kind: string;
   @ApiProperty() title: string;
@@ -86,6 +117,30 @@ export class NotificationPage {
   unread: number;
 }
 
+export class MyEmailResponse {
+  @ApiProperty({ format: 'uuid' }) id: string;
+  @ApiProperty({ format: 'date-time' }) createdAt: string;
+  @ApiProperty() subject: string;
+  @ApiProperty({ description: 'The message as the template made it (HTML).' })
+  body: string;
+  @ApiProperty({ nullable: true, type: String }) templateLabel: string | null;
+  @ApiProperty({ nullable: true, type: String, example: 'Reviewer' })
+  recipientType: string | null;
+  @ApiProperty({ nullable: true, type: String }) conferenceSlug: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  conferenceAcronym: string | null;
+  @ApiProperty({ nullable: true, type: String })
+  conferenceContact: string | null;
+  @ApiProperty({ nullable: true, type: String }) paperLabel: string | null;
+}
+
+export class EmailsQuery {
+  @ApiPropertyOptional({ default: 100, maximum: 200 })
+  @IsOptional()
+  @Transform(({ value }) => Number(value))
+  limit?: number;
+}
+
 export class MarkReadResponse {
   @ApiProperty() updated: number;
   @ApiProperty() unread: number;
@@ -108,8 +163,15 @@ export class BellService {
       'newest-first',
     );
     const rows = await this.database.db
-      .select()
+      .select({
+        n: notifications,
+        slug: conferences.slug,
+        acronym: conferences.acronym,
+        paperNo: submissions.paperNo,
+      })
       .from(notifications)
+      .leftJoin(conferences, eq(conferences.id, notifications.conferenceId))
+      .leftJoin(submissions, eq(submissions.id, notifications.submissionId))
       .where(
         and(
           eq(notifications.userId, user.id),
@@ -119,9 +181,18 @@ export class BellService {
       )
       .orderBy(...order.orderBy)
       .limit(limit + 1);
-    const result = page(rows, limit, (n) => ({ at: n.createdAt, id: n.id }));
+    const result = page(rows, limit, (r) => ({
+      at: r.n.createdAt,
+      id: r.n.id,
+    }));
     return {
-      data: result.data.map(toNotificationView),
+      data: result.data.map((r) => ({
+        ...toNotificationView(r.n),
+        conferenceSlug: r.slug,
+        conferenceAcronym: r.acronym,
+        paperLabel:
+          r.acronym && r.paperNo ? paperId(r.acronym, r.paperNo) : null,
+      })),
       nextCursor: result.nextCursor,
       unread: await this.unread(user),
     };
@@ -146,6 +217,72 @@ export class BellService {
       )
       .returning({ id: notifications.id });
     return { updated: updated.length, unread: await this.unread(user) };
+  }
+
+  /** Puts read notifications back to unread (the Notifications page's read / unread toggle). */
+  async markUnread(user: AuthUser, ids: string[]): Promise<MarkReadResponse> {
+    const updated =
+      ids.length === 0
+        ? []
+        : await this.database.db
+            .update(notifications)
+            .set({ readAt: null })
+            .where(
+              and(
+                eq(notifications.userId, user.id),
+                isNotNull(notifications.readAt),
+                inArray(notifications.id, ids),
+              ),
+            )
+            .returning({ id: notifications.id });
+    return { updated: updated.length, unread: await this.unread(user) };
+  }
+
+  /** The emails sent to my own address (the Emails tab), newest first. Only what was sent. */
+  async emails(user: AuthUser, limit: number): Promise<MyEmailResponse[]> {
+    const [me] = await this.database.db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, user.id));
+    if (!me?.email) {
+      return [];
+    }
+    const rows = await this.database.db
+      .select({
+        id: emailLog.id,
+        createdAt: emailLog.createdAt,
+        subject: emailLog.subject,
+        body: emailLog.body,
+        templateLabel: emailLog.templateLabel,
+        recipientType: emailLog.recipientType,
+        slug: conferences.slug,
+        acronym: conferences.acronym,
+        contact: conferences.contactEmail,
+        paperNo: submissions.paperNo,
+      })
+      .from(emailLog)
+      .leftJoin(conferences, eq(conferences.id, emailLog.conferenceId))
+      .leftJoin(submissions, eq(submissions.id, emailLog.submissionId))
+      .where(
+        and(
+          sql`lower(${emailLog.toEmail}) = lower(${me.email})`,
+          eq(emailLog.status, 'sent'),
+        ),
+      )
+      .orderBy(desc(emailLog.createdAt), desc(emailLog.id))
+      .limit(limit);
+    return rows.map((r) => ({
+      id: r.id,
+      createdAt: r.createdAt.toISOString(),
+      subject: r.subject,
+      body: r.body ?? '',
+      templateLabel: r.templateLabel,
+      recipientType: r.recipientType,
+      conferenceSlug: r.slug,
+      conferenceAcronym: r.acronym,
+      conferenceContact: r.contact,
+      paperLabel: r.acronym && r.paperNo ? paperId(r.acronym, r.paperNo) : null,
+    }));
   }
 
   private async unread(user: AuthUser): Promise<number> {
@@ -175,6 +312,17 @@ export class NotificationsController {
     return this.bell.list(user, query);
   }
 
+  @Post('unread')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark some of my notifications unread again' })
+  @ApiOkResponse({ type: MarkReadResponse })
+  markUnread(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: MarkUnreadDto,
+  ): Promise<MarkReadResponse> {
+    return this.bell.markUnread(user, dto.ids);
+  }
+
   @Post('read')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark my notifications read (these, or all)' })
@@ -184,5 +332,27 @@ export class NotificationsController {
     @Body() dto: MarkReadDto,
   ): Promise<MarkReadResponse> {
     return this.bell.markRead(user, dto.ids);
+  }
+}
+
+/** The emails sent to me (Notifications › Emails). */
+@ApiTags('notifications')
+@ApiBearerAuth()
+@Controller('me/emails')
+export class MyEmailsController {
+  constructor(private readonly bell: BellService) {}
+
+  @Get()
+  @ApiOperation({
+    summary:
+      'Emails sent to my address, newest first (what was sent, not drafts)',
+  })
+  @ApiOkResponse({ type: [MyEmailResponse] })
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query() query: EmailsQuery,
+  ): Promise<MyEmailResponse[]> {
+    const limit = Number.isInteger(query.limit) ? query.limit! : 100;
+    return this.bell.emails(user, Math.min(Math.max(limit, 1), 200));
   }
 }

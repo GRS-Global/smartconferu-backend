@@ -9,6 +9,7 @@ import {
   emailTemplates,
 } from '../database/schema/index.js';
 import {
+  emailLogoUrl,
   frameEmail,
   htmlToText,
   renderTemplate,
@@ -73,10 +74,13 @@ interface Template {
  */
 @Injectable()
 export class EmailQueueService {
-  private readonly logoUrl: string;
+  private readonly logoUrl: string | undefined;
 
   constructor(config: ConfigService<Env, true>) {
-    this.logoUrl = `${config.get('APP_URL', { infer: true }).replace(/\/$/, '')}/smartconferu-lockup.png`;
+    this.logoUrl = emailLogoUrl(
+      config.get('APP_URL', { infer: true }),
+      config.get('EMAIL_LOGO_URL', { infer: true }),
+    );
   }
 
   async enqueue(

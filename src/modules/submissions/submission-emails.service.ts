@@ -4,11 +4,13 @@ import {
   emailDate,
   escapeHtml,
   firstName,
+  renderTemplate,
   VALID_EMAIL,
 } from '../../core/email/email-render.js';
 import type {
   EmailConference,
   OutgoingEmail,
+  WrittenEmail,
   TemplateEmail,
 } from '../../core/email/email-queue.service.js';
 import {
@@ -145,9 +147,7 @@ export class SubmissionEmailsService {
       values: {
         ...this.common(ctx),
         first_name: firstName(to.name, to.email),
-        claim_link: this.link(
-          to.hasAccount ? '/prototype/login' : '/prototype/register',
-        ),
+        claim_link: this.link(to.hasAccount ? '/login' : '/register'),
         updates_note:
           submitterIsAuthor && to.corresponding
             ? 'You are marked as a corresponding author, so you will receive every update about this paper by email.'
@@ -167,7 +167,7 @@ export class SubmissionEmailsService {
         values: {
           ...this.common(ctx),
           first_name: firstName(c.name, c.email),
-          submission_link: this.link(`/prototype/submissions/${pid}/chair`),
+          submission_link: this.link(`/submissions/${pid}/chair`),
         },
       }),
     );
@@ -193,7 +193,7 @@ export class SubmissionEmailsService {
         values: {
           ...this.common(ctx),
           first_name: firstName(a.name, a.email),
-          submission_link: this.link(`/prototype/submissions/${pid}/author`),
+          submission_link: this.link(`/submissions/${pid}/author`),
         },
       }));
     return [
@@ -232,9 +232,7 @@ export class SubmissionEmailsService {
         chair_name: ctx.actor.name,
         first_name: firstName(a.name, a.email),
         submission_link: this.link(
-          a.hasAccount
-            ? `/prototype/submissions/${pid}/author`
-            : '/prototype/register',
+          a.hasAccount ? `/submissions/${pid}/author` : '/register',
         ),
       },
     });
@@ -302,6 +300,59 @@ export class SubmissionEmailsService {
     ];
   }
 
+  /**
+   * The chair's own email to some of a paper's authors ("Email authors" on a paper). `{{first_name}}`,
+   * `{{paper_title}}`, `{{submission_id}}`, `{{conference_name}}`... are filled in per person.
+   */
+  message(
+    ctx: PaperContext,
+    to: readonly { email: string; name: string }[],
+    message: { subject: string; body: string },
+  ): WrittenEmail[] {
+    const link = this.link(`/submissions/${this.paperId(ctx)}/author`);
+    return to.map((a): WrittenEmail => {
+      const values = {
+        ...this.common(ctx),
+        first_name: firstName(a.name, a.email),
+        conference_name: ctx.conference.title,
+        conference_acronym: ctx.conference.acronym,
+        submission_link: link,
+      };
+      return {
+        ...this.base(ctx),
+        key: 'paperMessage',
+        label: 'Message from the chair',
+        recipientType: 'Author',
+        to: a,
+        subject: renderTemplate(message.subject, values, { html: false }),
+        body: renderTemplate(message.body, values, { html: true }),
+      };
+    });
+  }
+
+  /** The chair asks the authors to fix something by a date. */
+  async fixRequested(
+    executor: Executor,
+    ctx: PaperContext,
+    ask: { issue: string; fixBy: string },
+  ): Promise<OutgoingEmail[]> {
+    const { updates } = await this.authorRecipients(executor, ctx);
+    const link = this.link(`/submissions/${this.paperId(ctx)}/author`);
+    return updates.map((a): OutgoingEmail => ({
+      ...this.base(ctx),
+      key: 'fixRequested',
+      label: 'Please fix your submission',
+      recipientType: 'Author',
+      to: a,
+      subject: `Please fix ${this.paperId(ctx)} by ${emailDate(ask.fixBy)}`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(a.name, a.email))},</p>` +
+        `<p>The chair of <b>${escapeHtml(ctx.conference.acronym)}</b> asks you to fix something in <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.paperId(ctx))}) by <b>${escapeHtml(emailDate(ask.fixBy))}</b>:</p>` +
+        `<p>“${escapeHtml(ask.issue).replace(/\n/g, '<br>')}”</p>` +
+        `<p>Upload the corrected file from the paper's page: <a href="${escapeHtml(link)}" style="color:#4F46E5">${escapeHtml(link)}</a></p>`,
+    }));
+  }
+
   /** The paper was withdrawn: its authors (updates list) and the chairs. */
   async withdrawn(
     executor: Executor,
@@ -361,7 +412,7 @@ export class SubmissionEmailsService {
     const values = {
       submission_id: pid,
       paper_title: ctx.submission.title,
-      upload_link: this.link(`/prototype/submissions/${pid}/author`),
+      upload_link: this.link(`/submissions/${pid}/author`),
       correction_reasons: reasons.html,
       correction_deadline:
         reasons.deadline || 'the date on your submission page',

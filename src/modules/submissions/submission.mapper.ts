@@ -61,6 +61,22 @@ export function viewOf(access: SubmissionAccess): SubmissionView {
   return rules.isAuthorOf(access) ? 'author' : 'reviewer';
 }
 
+/** The chair's open "Ask author to fix", kept in the paper's details. */
+function fixRequestOf(
+  details: Record<string, unknown>,
+): { issue: string; fixBy: string; at: string } | null {
+  const f = details.fixRequest;
+  if (typeof f !== 'object' || !f) return null;
+  const r = f as Record<string, unknown>;
+  return typeof r.issue === 'string' && r.issue
+    ? {
+        issue: r.issue,
+        fixBy: typeof r.fixBy === 'string' ? r.fixBy : '',
+        at: typeof r.at === 'string' ? r.at : '',
+      }
+    : null;
+}
+
 /** The paper as this user may see it. */
 export function toSubmission(
   bundle: PaperBundle,
@@ -161,6 +177,7 @@ export function toSubmission(
           ? (f.autoCheck as Record<string, unknown> | null)
           : null,
     })),
+    fixRequest: view === 'reviewer' ? null : fixRequestOf(details),
     withdrawnAt: iso(s.withdrawnAt),
     withdrawnBy: s.withdrawnBy,
     submittedAt: s.submittedAt.toISOString(),

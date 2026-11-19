@@ -30,7 +30,7 @@ export class EmailRecipientsService {
     this.appUrl = config.get('APP_URL', { infer: true }).replace(/\/$/, '');
   }
 
-  /** A full link into the app, e.g. link('/prototype/dashboard'). */
+  /** A full link into the app, e.g. link('/dashboard'). */
   link(path: string): string {
     return `${this.appUrl}${path}`;
   }
@@ -167,7 +167,7 @@ export class EmailRecipientsService {
         to: { email: person.email, name: person.name ?? null },
         values: {
           first_name: firstName(person.name, person.email),
-          profile_link: this.link('/prototype/register'),
+          profile_link: this.link('/register'),
         },
       }));
   }

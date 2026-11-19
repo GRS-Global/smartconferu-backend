@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Get,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -25,6 +26,7 @@ import {
   ReviewEnhanceDto,
   ScreeningAiDto,
   TopicsDto,
+  PaperSummaryResponse,
 } from './dto/ai.dto.js';
 import { PaperRagService } from './paper-rag.service.js';
 import { ConferenceWebsiteService } from './website/conference-website.service.js';
@@ -123,6 +125,33 @@ export class PaperAiController {
     @Body() dto: IngestDto,
   ) {
     return this.rag.ingestFor(user, submissionId, dto.force === true);
+  }
+
+  @Get('summary')
+  @ApiOperation({
+    summary:
+      "The paper's stored summary and key points (its chairs and assigned reviewers). It is written when the paper is given to a reviewer; status 'none' until then.",
+  })
+  @ApiOkResponse({ type: PaperSummaryResponse })
+  summary(
+    @CurrentUser() user: AuthUser,
+    @Param('submissionId', ParseUUIDPipe) submissionId: string,
+  ): Promise<PaperSummaryResponse> {
+    return this.rag.summaryFor(user, submissionId);
+  }
+
+  @Post('summary')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Write the paper's summary now (when there is none or it is for an older version), then return it. 409 NOT_READY without a file, 422 for a scanned PDF.",
+  })
+  @ApiOkResponse({ type: PaperSummaryResponse })
+  writeSummary(
+    @CurrentUser() user: AuthUser,
+    @Param('submissionId', ParseUUIDPipe) submissionId: string,
+  ): Promise<PaperSummaryResponse> {
+    return this.rag.summarizeFor(user, submissionId, false);
   }
 
   @Post('chat')

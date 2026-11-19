@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   and,
   asc,
+  desc,
   eq,
   inArray,
   isNotNull,
@@ -18,6 +19,7 @@ import {
   pendingReviewAssignments,
   profiles,
   reviewAssignments,
+  reviewExtensionRequests,
   reviews,
   submissionAuthors,
   submissions,
@@ -27,6 +29,7 @@ import {
 export type AssignmentRow = typeof reviewAssignments.$inferSelect;
 export type ReviewRow = typeof reviews.$inferSelect;
 export type PendingRow = typeof pendingReviewAssignments.$inferSelect;
+export type ExtensionRow = typeof reviewExtensionRequests.$inferSelect;
 export type MemberRow = typeof conferenceMembers.$inferSelect;
 export type DecisionTypeRow = typeof decisionTypes.$inferSelect;
 
@@ -35,6 +38,8 @@ export interface AssignmentBundle {
   assignment: AssignmentRow;
   reviewer: { userId: string; name: string; email: string | null };
   review: ReviewRow | null;
+  /** The reviewer's latest "Ask for more time" on this paper (any state), or null. */
+  extension: ExtensionRow | null;
 }
 
 export interface PendingBundle {
@@ -99,9 +104,14 @@ export class ReviewsRepository {
       .leftJoin(reviews, eq(reviews.assignmentId, reviewAssignments.id))
       .where(and(...conditions))
       .orderBy(asc(reviewAssignments.assignedAt), asc(reviewAssignments.id));
+    const latest = await this.latestExtensions(
+      executor,
+      rows.map((r) => r.assignment.id),
+    );
     return rows.map((r) => ({
       assignment: r.assignment,
       review: r.review,
+      extension: latest.get(r.assignment.id) ?? null,
       reviewer: {
         userId: r.assignment.reviewerId,
         name: r.name,
@@ -132,9 +142,14 @@ export class ReviewsRepository {
       .leftJoin(reviews, eq(reviews.assignmentId, reviewAssignments.id))
       .where(eq(submissions.conferenceId, conferenceId))
       .orderBy(asc(reviewAssignments.assignedAt), asc(reviewAssignments.id));
+    const latest = await this.latestExtensions(
+      executor,
+      rows.map((r) => r.assignment.id),
+    );
     return rows.map((r) => ({
       assignment: r.assignment,
       review: r.review,
+      extension: latest.get(r.assignment.id) ?? null,
       reviewer: {
         userId: r.assignment.reviewerId,
         name: r.name,
@@ -247,6 +262,82 @@ export class ReviewsRepository {
       .update(reviewAssignments)
       .set(values)
       .where(eq(reviewAssignments.id, assignmentId))
+      .returning();
+    return row;
+  }
+
+  // "Ask for more time" ----------------------------------------------------------------------------
+
+  /** The newest request of each assignment (any state). */
+  async latestExtensions(
+    executor: Executor,
+    assignmentIds: readonly string[],
+  ): Promise<Map<string, ExtensionRow>> {
+    const latest = new Map<string, ExtensionRow>();
+    if (assignmentIds.length === 0) {
+      return latest;
+    }
+    const rows = await executor
+      .select()
+      .from(reviewExtensionRequests)
+      .where(inArray(reviewExtensionRequests.assignmentId, [...assignmentIds]))
+      .orderBy(desc(reviewExtensionRequests.createdAt));
+    for (const row of rows) {
+      if (!latest.has(row.assignmentId)) {
+        latest.set(row.assignmentId, row);
+      }
+    }
+    return latest;
+  }
+
+  async openExtension(
+    tx: Tx,
+    assignmentId: string,
+  ): Promise<ExtensionRow | undefined> {
+    const [row] = await tx
+      .select()
+      .from(reviewExtensionRequests)
+      .where(
+        and(
+          eq(reviewExtensionRequests.assignmentId, assignmentId),
+          eq(reviewExtensionRequests.status, 'pending'),
+        ),
+      );
+    return row;
+  }
+
+  async insertExtension(
+    tx: Tx,
+    values: typeof reviewExtensionRequests.$inferInsert,
+  ): Promise<ExtensionRow> {
+    const [row] = await tx
+      .insert(reviewExtensionRequests)
+      .values(values)
+      .returning();
+    return row;
+  }
+
+  async extensionForUpdate(
+    tx: Tx,
+    extensionId: string,
+  ): Promise<ExtensionRow | undefined> {
+    const [row] = await tx
+      .select()
+      .from(reviewExtensionRequests)
+      .where(eq(reviewExtensionRequests.id, extensionId))
+      .for('update');
+    return row;
+  }
+
+  async updateExtension(
+    tx: Tx,
+    extensionId: string,
+    values: Partial<typeof reviewExtensionRequests.$inferInsert>,
+  ): Promise<ExtensionRow> {
+    const [row] = await tx
+      .update(reviewExtensionRequests)
+      .set(values)
+      .where(eq(reviewExtensionRequests.id, extensionId))
       .returning();
     return row;
   }

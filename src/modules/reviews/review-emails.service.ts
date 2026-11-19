@@ -5,7 +5,10 @@ import {
   escapeHtml,
   firstName,
 } from '../../core/email/email-render.js';
-import type { TemplateEmail } from '../../core/email/email-queue.service.js';
+import type {
+  TemplateEmail,
+  WrittenEmail,
+} from '../../core/email/email-queue.service.js';
 import {
   EmailRecipientsService,
   type Person,
@@ -51,7 +54,7 @@ export class ReviewEmailsService {
   }
 
   private reviewerLink(ctx: PaperContext) {
-    return this.recipients.link(`/prototype/reviewer/${ctx.conference.slug}`);
+    return this.recipients.link(`/reviewer/${ctx.conference.slug}`);
   }
 
   /** "Papers assigned to you", one per reviewer given the paper. */
@@ -154,13 +157,128 @@ export class ReviewEmailsService {
                 ? `${Math.min(...scores)} – ${Math.max(...scores)}`
                 : '—',
             submission_link: this.recipients.link(
-              `/prototype/submissions/${this.pid(ctx)}/chair/review`,
+              `/submissions/${this.pid(ctx)}/chair/review`,
             ),
           },
         });
       }
     }
     return emails;
+  }
+
+  /** A reviewer asked for more time → the conference's chairs. */
+  extensionRequested(
+    ctx: PaperContext,
+    reviewer: Person,
+    chairs: readonly Person[],
+    ask: { date: string; reason: string | null; currentDue: string | null },
+  ): WrittenEmail[] {
+    const link = this.recipients.link(
+      `/submissions/${this.pid(ctx)}/chair/review`,
+    );
+    return chairs.map((chair) => ({
+      ...this.base(ctx),
+      key: 'reviewExtensionRequested',
+      label: 'Reviewer asks for more time',
+      recipientType: 'Chair',
+      to: chair,
+      subject: `More time asked for ${this.pid(ctx)}`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(chair.name, chair.email))},</p>` +
+        `<p>${escapeHtml(reviewer.name)} asks to move the review deadline of <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.pid(ctx))}) to <b>${escapeHtml(emailDate(ask.date))}</b>${ask.currentDue ? ` (now ${escapeHtml(emailDate(ask.currentDue))})` : ''}.</p>` +
+        (ask.reason ? `<p>“${multiline(ask.reason)}”</p>` : '') +
+        `<p>Approve or decline it on the paper's review page: <a href="${escapeHtml(link)}" style="color:#4F46E5">${escapeHtml(link)}</a></p>`,
+    }));
+  }
+
+  /** The chair moved a reviewer's deadline on one paper → the reviewer. */
+  dueDateChanged(
+    ctx: PaperContext,
+    reviewer: Person,
+    date: string,
+  ): WrittenEmail {
+    return {
+      ...this.base(ctx),
+      key: 'reviewDueDateChanged',
+      label: 'Review deadline changed',
+      recipientType: 'Reviewer',
+      to: reviewer,
+      subject: `New review deadline for ${this.pid(ctx)}: ${emailDate(date)}`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(reviewer.name, reviewer.email))},</p>` +
+        `<p>The chair set a new deadline for your review of <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.pid(ctx))}): <b>${escapeHtml(emailDate(date))}</b>.</p>` +
+        `<p><a href="${escapeHtml(this.reviewerLink(ctx))}" style="color:#4F46E5">${escapeHtml(this.reviewerLink(ctx))}</a></p>`,
+    };
+  }
+
+  /** The chair nudges a reviewer about one paper ("Remind"), with an optional note. */
+  reminder(
+    ctx: PaperContext,
+    reviewer: Person,
+    ask: { dueAt: Date | null; note: string | null },
+  ): WrittenEmail {
+    const due = emailDate(ask.dueAt);
+    return {
+      ...this.base(ctx),
+      key: 'reviewReminderFromChair',
+      label: 'Review reminder',
+      recipientType: 'Reviewer',
+      to: reviewer,
+      subject: `Reminder: your review of ${this.pid(ctx)}${due ? ` is due ${due}` : ''}`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(reviewer.name, reviewer.email))},</p>` +
+        `<p>The chair of <b>${escapeHtml(ctx.conference.acronym)}</b> reminds you that your review of <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.pid(ctx))}) is still waiting${due ? `; it is due <b>${escapeHtml(due)}</b>` : ''}.</p>` +
+        (ask.note ? `<p>“${multiline(ask.note)}”</p>` : '') +
+        `<p><a href="${escapeHtml(this.reviewerLink(ctx))}" style="color:#4F46E5">${escapeHtml(this.reviewerLink(ctx))}</a></p>`,
+    };
+  }
+
+  /** The chair writes to a reviewer about one paper. */
+  chairMessage(
+    ctx: PaperContext,
+    reviewer: Person,
+    message: string,
+  ): WrittenEmail {
+    return {
+      ...this.base(ctx),
+      key: 'reviewerMessage',
+      label: 'Message from the chair',
+      recipientType: 'Reviewer',
+      to: reviewer,
+      subject: `Message about ${this.pid(ctx)} from the chair`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(reviewer.name, reviewer.email))},</p>` +
+        `<p>The chair of <b>${escapeHtml(ctx.conference.acronym)}</b> wrote to you about <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.pid(ctx))}):</p>` +
+        `<p>“${multiline(message)}”</p>` +
+        `<p><a href="${escapeHtml(this.reviewerLink(ctx))}" style="color:#4F46E5">${escapeHtml(this.reviewerLink(ctx))}</a></p>`,
+    };
+  }
+
+  /** The chair answered the request → the reviewer. */
+  extensionDecided(
+    ctx: PaperContext,
+    reviewer: Person,
+    answer: { approved: boolean; date: string; note: string | null },
+  ): WrittenEmail {
+    return {
+      ...this.base(ctx),
+      key: answer.approved
+        ? 'reviewExtensionApproved'
+        : 'reviewExtensionDeclined',
+      label: answer.approved ? 'More time approved' : 'More time not approved',
+      recipientType: 'Reviewer',
+      to: reviewer,
+      subject: answer.approved
+        ? `New review deadline for ${this.pid(ctx)}: ${emailDate(answer.date)}`
+        : `More time for ${this.pid(ctx)} was not approved`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(reviewer.name, reviewer.email))},</p>` +
+        (answer.approved
+          ? `<p>The chair approved your request: your review of <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.pid(ctx))}) is now due on <b>${escapeHtml(emailDate(answer.date))}</b>.</p>`
+          : `<p>The chair could not move the deadline of your review of <b>${escapeHtml(ctx.submission.title)}</b> (${escapeHtml(this.pid(ctx))}); it stays as it was.</p>`) +
+        (answer.note ? `<p>“${multiline(answer.note)}”</p>` : '') +
+        `<p><a href="${escapeHtml(this.reviewerLink(ctx))}" style="color:#4F46E5">${escapeHtml(this.reviewerLink(ctx))}</a></p>`,
+    };
   }
 
   /** The chair changed a review the reviewer had sent. */
@@ -234,9 +352,7 @@ export class ReviewEmailsService {
       revision_deadline: 'the date shown on your submission page',
       final_decision_date:
         emailDate(sent.notificationDate) || 'the final decision date',
-      upload_link: this.recipients.link(
-        `/prototype/submissions/${this.pid(ctx)}/author`,
-      ),
+      upload_link: this.recipients.link(`/submissions/${this.pid(ctx)}/author`),
     };
     const authors = (await this.paperEmails.authorUpdates(executor, ctx)).map(
       (a): TemplateEmail => ({

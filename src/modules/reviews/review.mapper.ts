@@ -56,6 +56,17 @@ export function toAssignment(
     respondedAt: iso(a.respondedAt),
     declineReason: a.declineReason,
     review: b.review ? toReview(b.review) : null,
+    extension: b.extension
+      ? {
+          id: b.extension.id,
+          date: b.extension.requestedDate,
+          reason: b.extension.reason,
+          status: b.extension.status,
+          note: b.extension.note,
+          createdAt: b.extension.createdAt.toISOString(),
+          decidedAt: iso(b.extension.decidedAt),
+        }
+      : null,
     can: {
       respond: own && a.status === 'assigned',
       review:

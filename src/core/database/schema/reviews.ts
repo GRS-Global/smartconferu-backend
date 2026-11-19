@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  date,
   index,
   jsonb,
   pgTable,
@@ -12,7 +13,12 @@ import {
 } from 'drizzle-orm/pg-core';
 import { createdAt, timestamptz, updatedAt } from './columns.js';
 import { conferenceMembers, decisionTypes } from './conferences.js';
-import { assignmentStatus, decisionOutcome, reviewStatus } from './enums.js';
+import {
+  assignmentStatus,
+  decisionOutcome,
+  extensionStatus,
+  reviewStatus,
+} from './enums.js';
 import { users } from './identity.js';
 import { submissions } from './submissions.js';
 
@@ -40,6 +46,28 @@ export const reviewAssignments = pgTable(
     ),
     index('review_assignments_reviewer_idx').on(t.reviewerId),
   ],
+);
+
+/**
+ * A reviewer's "Ask for more time" on one paper: the date asked for and why. A chair approves it
+ * (the assignment's due date moves to that date) or declines it; the reviewer is told either way.
+ */
+export const reviewExtensionRequests = pgTable(
+  'review_extension_requests',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    assignmentId: uuid('assignment_id')
+      .notNull()
+      .references(() => reviewAssignments.id, { onDelete: 'cascade' }),
+    requestedDate: date('requested_date', { mode: 'string' }).notNull(),
+    reason: text(),
+    status: extensionStatus().notNull().default('pending'),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: timestamptz('decided_at'),
+    note: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('review_extension_requests_assignment_idx').on(t.assignmentId)],
 );
 
 /**

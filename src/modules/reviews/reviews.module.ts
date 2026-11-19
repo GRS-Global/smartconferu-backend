@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from '../ai/ai.module.js';
 import { SubmissionsModule } from '../submissions/submissions.module.js';
 import { ChairOverviewController } from './chair-overview.controller.js';
 import { ChairOverviewService } from './chair-overview.service.js';
@@ -10,6 +11,7 @@ import {
   AssignmentsController,
   ChairReviewsController,
   DecisionTypesController,
+  ExtensionRequestsController,
   MyReviewsController,
   PaperReviewsController,
   PendingAssignmentsController,
@@ -19,8 +21,9 @@ import { ReviewsService } from './reviews.service.js';
 
 /** Peer review and sending decisions. */
 @Module({
-  imports: [SubmissionsModule],
+  imports: [SubmissionsModule, AiModule],
   controllers: [
+    ExtensionRequestsController,
     MyReviewsController,
     PaperReviewsController,
     AssignmentsController,

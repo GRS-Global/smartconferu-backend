@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiQuery,
@@ -43,6 +44,11 @@ import {
   SaveReviewResponse,
   ShareReviewDto,
   ReviewFormResponse,
+  DecideExtensionDto,
+  RequestExtensionDto,
+  MessageReviewerDto,
+  RemindReviewerDto,
+  SetDueDateDto,
 } from './dto/review.dto.js';
 import { ReviewsService } from './reviews.service.js';
 
@@ -151,6 +157,69 @@ export class AssignmentsController {
     return this.reviews.reviewForm(user, assignmentId);
   }
 
+  @Post(':assignmentId/remind')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Remind this reviewer about this paper (chairs): a bell and an email, with an optional note. Only while the review is not sent.',
+  })
+  @ApiNoContentResponse()
+  async remind(
+    @CurrentUser() user: AuthUser,
+    @Id('assignmentId') assignmentId: string,
+    @Body() dto: RemindReviewerDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    await this.reviews.remind(user, assignmentId, dto, client);
+  }
+
+  @Post(':assignmentId/message')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Write to this reviewer about this paper (chairs): a bell and an email.',
+  })
+  @ApiNoContentResponse()
+  async message(
+    @CurrentUser() user: AuthUser,
+    @Id('assignmentId') assignmentId: string,
+    @Body() dto: MessageReviewerDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    await this.reviews.messageReviewer(user, assignmentId, dto, client);
+  }
+
+  @Patch(':assignmentId/due-date')
+  @ApiOperation({
+    summary:
+      "Move this reviewer's deadline on this paper (chairs). The reviewer is told.",
+  })
+  @ApiOkResponse({ type: AssignmentResponse })
+  setDueDate(
+    @CurrentUser() user: AuthUser,
+    @Id('assignmentId') assignmentId: string,
+    @Body() dto: SetDueDateDto,
+    @Client() client: ClientInfo,
+  ): Promise<AssignmentResponse> {
+    return this.reviews.setDueDate(user, assignmentId, dto, client);
+  }
+
+  @Post(':assignmentId/extension-request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Ask the chairs for more time: the new deadline asked for and why (the assignment's reviewer). One request may wait at a time.",
+  })
+  @ApiOkResponse({ type: AssignmentResponse })
+  requestExtension(
+    @CurrentUser() user: AuthUser,
+    @Id('assignmentId') assignmentId: string,
+    @Body() dto: RequestExtensionDto,
+    @Client() client: ClientInfo,
+  ): Promise<AssignmentResponse> {
+    return this.reviews.requestExtension(user, assignmentId, dto, client);
+  }
+
   @Post(':assignmentId/respond')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -194,6 +263,30 @@ export class AssignmentsController {
     @Client() client: ClientInfo,
   ): Promise<PaperReviewsResponse> {
     return this.reviews.unassign(user, assignmentId, client);
+  }
+}
+
+/** A reviewer's "Ask for more time", as a chair answers it. */
+@ApiTags('reviews')
+@ApiBearerAuth()
+@Controller('extension-requests')
+export class ExtensionRequestsController {
+  constructor(private readonly reviews: ReviewsService) {}
+
+  @Post(':extensionId/decision')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Approve (the reviewer's deadline moves to the date asked for) or decline a request that is waiting (chairs). The reviewer is told.",
+  })
+  @ApiOkResponse({ type: AssignmentResponse })
+  decide(
+    @CurrentUser() user: AuthUser,
+    @Id('extensionId') extensionId: string,
+    @Body() dto: DecideExtensionDto,
+    @Client() client: ClientInfo,
+  ): Promise<AssignmentResponse> {
+    return this.reviews.decideExtension(user, extensionId, dto, client);
   }
 }
 

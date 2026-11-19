@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEmail,
   IsIn,
   IsInt,
@@ -279,6 +280,12 @@ export class PaperFileResponse {
   autoCheck: Record<string, unknown> | null;
 }
 
+export class FixRequestResponse {
+  @ApiProperty() issue: string;
+  @ApiProperty({ example: '2027-02-10' }) fixBy: string;
+  @ApiProperty({ format: 'date-time' }) at: string;
+}
+
 export const SUBMISSION_VIEWS = ['chair', 'author', 'reviewer'] as const;
 export type SubmissionView = (typeof SUBMISSION_VIEWS)[number];
 
@@ -330,6 +337,12 @@ export class SubmissionResponse {
   })
   screening: Record<string, unknown> | null;
   @ApiProperty({ type: [PaperFileResponse] }) files: PaperFileResponse[];
+  @ApiProperty({
+    nullable: true,
+    type: FixRequestResponse,
+    description: 'An open "Ask author to fix" (chairs and authors).',
+  })
+  fixRequest: FixRequestResponse | null;
   @ApiProperty({ nullable: true, type: String }) withdrawnAt: string | null;
   @ApiProperty({ nullable: true, enum: ['author', 'chair'], type: String })
   withdrawnBy: string | null;
@@ -375,4 +388,79 @@ export class EmailsQueuedResponse {
     description: 'Turned off by the conference, or duplicate addresses.',
   })
   skipped: number;
+}
+
+export class FixRequestDto {
+  @ApiProperty({
+    description: 'What the authors have to fix.',
+    maxLength: 2000,
+  })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: 'Say what needs fixing.' })
+  @MaxLength(2000)
+  issue: string;
+
+  @ApiProperty({
+    example: '2027-02-10',
+    description: 'By when (YYYY-MM-DD, not in the past).',
+  })
+  @IsDateString({ strict: true }, { message: 'Choose a date.' })
+  fixBy: string;
+}
+
+export class PaperEmailDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Email addresses of authors of this paper (at most 50).',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @IsEmail({}, { each: true })
+  to: string[];
+
+  @ApiProperty({ maxLength: 300, description: 'May use {{first_name}}...' })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: 'The email needs a subject.' })
+  @MaxLength(300)
+  subject: string;
+
+  @ApiProperty({ maxLength: 50000, description: 'HTML, with placeholders.' })
+  @IsString()
+  @IsNotEmpty({ message: 'The email needs a message.' })
+  @MaxLength(50000)
+  body: string;
+}
+
+export class PaperEmailQueuedResponse {
+  @ApiProperty() queued: number;
+  @ApiProperty() skipped: number;
+}
+
+export class PaperIdsDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Papers of this conference (at most 500).',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  ids: string[];
+}
+
+export class ChangeTrackDto extends PaperIdsDto {
+  @ApiProperty({ example: 'AI Track' })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty({ message: 'Choose a track.' })
+  @MaxLength(200)
+  track: string;
+}
+
+export class CountResponse {
+  @ApiProperty({ description: 'How many papers were changed or removed.' })
+  count: number;
 }

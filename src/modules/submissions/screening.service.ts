@@ -189,6 +189,7 @@ export class ScreeningService {
       const { auto: _auto, ...own } = record;
       validateScreeningRecord(own, {
         folder: `${submission.conferenceId}/${submissionId}/`,
+        reportsFolder: `conferences/${submission.conferenceId}/screening/`,
         initialCheck: screeningConfigOf(conference).settings.initialCheck,
       });
 

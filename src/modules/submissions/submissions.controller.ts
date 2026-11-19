@@ -33,6 +33,12 @@ import { Client, type ClientInfo } from '../../core/http/client-info.js';
 import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import {
   AuthorListDto,
+  ChangeTrackDto,
+  CountResponse,
+  FixRequestDto,
+  PaperEmailDto,
+  PaperEmailQueuedResponse,
+  PaperIdsDto,
   CreateSubmissionDto,
   ConferencePapersQuery,
   DuplicateQuery,
@@ -143,6 +149,40 @@ export class ConferenceSubmissionsController {
       conferenceId,
       query.paperNo,
     );
+  }
+
+  @Patch('track')
+  @ApiOperation({ summary: 'Move papers to another track (chairs)' })
+  @ApiOkResponse({ type: CountResponse })
+  changeTrack(
+    @CurrentUser() user: AuthUser,
+    @ConferenceId() conferenceId: string,
+    @Body() dto: ChangeTrackDto,
+    @Client() client: ClientInfo,
+  ): Promise<CountResponse> {
+    return this.submissions.changeTrack(
+      user,
+      conferenceId,
+      dto.ids,
+      dto.track,
+      client,
+    );
+  }
+
+  @Post('delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Delete papers for good, with their authors, files, assignments and reviews (chairs)',
+  })
+  @ApiOkResponse({ type: CountResponse })
+  deleteMany(
+    @CurrentUser() user: AuthUser,
+    @ConferenceId() conferenceId: string,
+    @Body() dto: PaperIdsDto,
+    @Client() client: ClientInfo,
+  ): Promise<CountResponse> {
+    return this.submissions.deleteMany(user, conferenceId, dto.ids, client);
   }
 
   @Get('duplicate-check')
@@ -341,6 +381,38 @@ export class SubmissionsController {
     @Client() client: ClientInfo,
   ): Promise<SubmissionResponse> {
     return this.submissions.withdraw(user, submissionId, client);
+  }
+
+  @Post(':submissionId/email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      "Email some of this paper's authors (chairs); {{first_name}}, {{paper_title}}... are filled in for each person. Listed in Email Logs.",
+  })
+  @ApiOkResponse({ type: PaperEmailQueuedResponse })
+  emailAuthors(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+    @Body() dto: PaperEmailDto,
+    @Client() client: ClientInfo,
+  ): Promise<PaperEmailQueuedResponse> {
+    return this.submissions.emailAuthors(user, submissionId, dto, client);
+  }
+
+  @Post(':submissionId/fix-request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Ask the authors to fix something by a date (chairs). They are told; it stays on the paper until a new version is uploaded.',
+  })
+  @ApiOkResponse({ type: SubmissionResponse })
+  requestFix(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+    @Body() dto: FixRequestDto,
+    @Client() client: ClientInfo,
+  ): Promise<SubmissionResponse> {
+    return this.submissions.requestFix(user, submissionId, dto, client);
   }
 
   @Post(':submissionId/on-behalf-email')

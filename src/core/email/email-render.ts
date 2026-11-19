@@ -110,6 +110,32 @@ function stripSignOff(bodyHtml: string): string {
     : html;
 }
 
+/** Hosts a mail client cannot reach: this computer or a private network. */
+const PRIVATE_HOST =
+  /^(localhost|.*\.(local|localhost|internal|lan)|127\..*|10\..*|192\.168\..*|172\.(1[6-9]|2\d|3[01])\..*|0\.0\.0\.0|\[?::1\]?)$/i;
+
+/**
+ * The logo URL for emails: the one configured, else the app's own logo when the app is on a public
+ * address; undefined (the name is written out) when it is not, so a mail client never shows a
+ * broken image.
+ */
+export function emailLogoUrl(
+  appUrl: string,
+  configured?: string | null,
+): string | undefined {
+  if (configured) {
+    return configured;
+  }
+  try {
+    const { hostname } = new URL(appUrl);
+    return PRIVATE_HOST.test(hostname)
+      ? undefined
+      : `${appUrl.replace(/\/$/, '')}/smartconferu-lockup.png`;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface FrameOptions {
   /** The email's name ("Submission received"), shown as its heading. */
   title: string;

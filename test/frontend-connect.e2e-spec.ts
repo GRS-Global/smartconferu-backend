@@ -418,6 +418,251 @@ describe('Frontend connection helpers', () => {
     });
   });
 
+  describe('chair actions on papers', () => {
+    const PDF = Buffer.from('%PDF-1.7\n%%EOF\n');
+    const send = (
+      method: 'patch' | 'put' | 'delete',
+      token: string,
+      path: string,
+      body?: object,
+    ) =>
+      http()
+        [method](api(path))
+        .set('Authorization', `Bearer ${token}`)
+        .send(body ?? {});
+    const upload = (token: string, paperId: string) =>
+      http()
+        .post(api(`/submissions/${paperId}/files`))
+        .set('Authorization', `Bearer ${token}`)
+        .attach('file', PDF, 'paper.pdf');
+
+    it("moves one reviewer's deadline, and tells them", async () => {
+      const { chair, author, conf, paper } = await setup();
+      const reviewer = await person({ firstName: 'Rita', lastName: 'Rev' });
+      const member = await as(chair.token)
+        .post(`/conferences/${conf.id}/members`, {
+          email: reviewer.email,
+          role: 'reviewer',
+        })
+        .expect(201);
+      await as(reviewer.token)
+        .post(`/invitations/${member.body.member.id}/accept`)
+        .expect(200);
+      const given = await as(chair.token)
+        .post(`/submissions/${paper.id}/assignments`, {
+          memberIds: [member.body.member.id],
+          dueDate: '2099-04-30',
+        })
+        .expect(200);
+      const assignmentId = given.body.assignments[0].id as string;
+
+      await send(
+        'patch',
+        chair.token,
+        `/assignments/${assignmentId}/due-date`,
+        {
+          date: '2001-01-01',
+        },
+      ).expect(422);
+      await send(
+        'patch',
+        reviewer.token,
+        `/assignments/${assignmentId}/due-date`,
+        {
+          date: '2099-06-01',
+        },
+      ).expect(404);
+      await send(
+        'patch',
+        author.token,
+        `/assignments/${assignmentId}/due-date`,
+        {
+          date: '2099-06-01',
+        },
+      ).expect(404);
+      const moved = await send(
+        'patch',
+        chair.token,
+        `/assignments/${assignmentId}/due-date`,
+        { date: '2099-06-01' },
+      ).expect(200);
+      expect(moved.body.dueAt).toMatch(/^2099-06-01/);
+      const mine = await as(reviewer.token)
+        .get('/me/review-assignments')
+        .expect(200);
+      expect(mine.body[0].dueAt).toMatch(/^2099-06-01/);
+      const bell = await t.db.query(
+        "select title from notifications where kind = 'due_date_changed' and user_id = $1",
+        [reviewer.id],
+      );
+      expect(bell.rows).toHaveLength(1);
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .some(
+            (m) =>
+              m.to === reviewer.email &&
+              /New review deadline for/.test(m.subject),
+          ),
+      ).toBe(true);
+    });
+
+    it('lets a chair email some authors of a paper, with their names filled in', async () => {
+      const { chair, author, paper } = await setup();
+      const send = (token: string, body: object) =>
+        as(token).post(`/submissions/${paper.id}/email`, body);
+      const message = {
+        to: [author.email],
+        subject: '{{submission_id}}: a question',
+        body: '<p>Hi {{first_name}}, about {{paper_title}}.</p>',
+      };
+      await send(author.token, message).expect(403);
+      await send(chair.token, { ...message, body: '<p> </p>' }).expect(400);
+      await send(chair.token, { ...message, to: ['stranger@example.org'] }).expect(
+        422,
+      );
+      const done = await send(chair.token, message).expect(200);
+      expect(done.body.queued).toBe(1);
+      await t.sendQueuedEmails();
+      const mail = t.outbox().find((m) => m.to === author.email && /a question/.test(m.subject));
+      expect(mail).toBeDefined();
+      expect(mail!.subject).toMatch(/^[A-Z0-9]+-\d+: a question$/);
+      expect(mail!.html).toMatch(/Hi Ada, about Graph networks/);
+      // it is listed in Email Logs
+      const log = await as(chair.token)
+        .get(`/conferences/${paper.conferenceId}/email-log`)
+        .expect(200);
+      expect(
+        log.body.data.some(
+          (l: { event: string; submissionId: string }) =>
+            l.event === 'paper_message' && l.submissionId === paper.id,
+        ),
+      ).toBe(true);
+    });
+
+    it('asks the authors to fix something; a new version answers it', async () => {
+      const { chair, author, paper } = await setup();
+      const ask = (token: string, body: object) =>
+        as(token).post(`/submissions/${paper.id}/fix-request`, body);
+      await ask(chair.token, {
+        issue: 'Fonts are too small.',
+        fixBy: '2001-01-01',
+      }).expect(422);
+      await ask(author.token, {
+        issue: 'Fonts are too small.',
+        fixBy: '2099-03-01',
+      }).expect(403);
+      await ask(chair.token, { issue: '  ', fixBy: '2099-03-01' }).expect(400);
+      const done = await ask(chair.token, {
+        issue: 'Fonts are too small.',
+        fixBy: '2099-03-01',
+      }).expect(200);
+      expect(done.body.fixRequest).toMatchObject({
+        issue: 'Fonts are too small.',
+        fixBy: '2099-03-01',
+      });
+      // the authors see it and are told; reviewers never see it
+      const seen = await as(author.token)
+        .get(`/submissions/${paper.id}`)
+        .expect(200);
+      expect(seen.body.fixRequest.issue).toBe('Fonts are too small.');
+      const bell = await t.db.query(
+        "select title from notifications where kind = 'fix_requested' and user_id = $1",
+        [author.id],
+      );
+      expect(bell.rows).toHaveLength(1);
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .some(
+            (m) => m.to === author.email && /Please fix .* by/.test(m.subject),
+          ),
+      ).toBe(true);
+      // the corrected file answers it
+      await upload(author.token, paper.id).expect(201);
+      const after = await as(author.token)
+        .get(`/submissions/${paper.id}`)
+        .expect(200);
+      expect(after.body.fixRequest).toBeNull();
+    });
+
+    it('moves papers to another track and deletes them, for chairs of that conference only', async () => {
+      const { chair, author, conf, paper } = await setup();
+      const stranger = await person();
+      const otherConf = await openConference(stranger);
+      const track = (token: string, body: object) =>
+        send('patch', token, `/conferences/${conf.id}/submissions/track`, body);
+      await track(author.token, {
+        ids: [paper.id],
+        track: 'Systems Track',
+      }).expect(403);
+      await track(stranger.token, {
+        ids: [paper.id],
+        track: 'Systems Track',
+      }).expect(404);
+      await track(chair.token, { ids: [], track: 'Systems Track' }).expect(400);
+      const changed = await track(chair.token, {
+        ids: [paper.id, '00000000-0000-4000-8000-000000000000'],
+        track: 'Systems Track',
+      }).expect(200);
+      expect(changed.body.count).toBe(1); // the unknown id is ignored
+      const view = await as(chair.token)
+        .get(`/submissions/${paper.id}`)
+        .expect(200);
+      expect(view.body.track).toBe('Systems Track');
+      // another conference's chair cannot touch it through their own conference either
+      const none = await send(
+        'patch',
+        stranger.token,
+        `/conferences/${otherConf.id}/submissions/track`,
+        {
+          ids: [paper.id],
+          track: 'X',
+        },
+      ).expect(200);
+      expect(none.body.count).toBe(0);
+
+      const del = (token: string, id = conf.id) =>
+        as(token).post(`/conferences/${id}/submissions/delete`, {
+          ids: [paper.id],
+        });
+      await del(author.token).expect(403);
+      expect(
+        (await del(stranger.token, otherConf.id).expect(200)).body.count,
+      ).toBe(0);
+      expect((await del(chair.token).expect(200)).body.count).toBe(1);
+      await as(chair.token).get(`/submissions/${paper.id}`).expect(404);
+      await as(author.token).get(`/submissions/${paper.id}`).expect(404);
+    });
+
+    it("keeps a screening report uploaded for the conference on the paper's screening record", async () => {
+      const { chair, conf, author, paper } = await setup();
+      await upload(author.token, paper.id).expect(201);
+      const report = await http()
+        .post(api(`/files?purpose=screening_report&conferenceId=${conf.id}`))
+        .set('Authorization', `Bearer ${chair.token}`)
+        .attach('file', PDF, 'report.pdf')
+        .expect(201);
+      const save = (paths: Record<string, string>) =>
+        send('put', chair.token, `/submissions/${paper.id}/screening/1`, {
+          record: { paths },
+        });
+      await save({ 'report.pdf': report.body.path }).expect(200);
+      await save({ 'report.pdf': `conferences/${conf.id}/../x.pdf` }).expect(
+        400,
+      );
+      await save({ 'report.pdf': 'someone-elses/file.pdf' }).expect(400);
+      const view = await as(chair.token)
+        .get(`/submissions/${paper.id}`)
+        .expect(200);
+      expect(view.body.screening['1'].paths['report.pdf']).toBe(
+        report.body.path,
+      );
+    });
+  });
+
   describe('uploads', () => {
     const png = Buffer.concat([
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

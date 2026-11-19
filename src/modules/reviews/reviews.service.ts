@@ -5,19 +5,31 @@ import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
 import type { Executor, Tx } from '../../core/database/database.types.js';
-import { EmailQueueService } from '../../core/email/email-queue.service.js';
-import { EmailRecipientsService } from '../../core/email/email-recipients.service.js';
+import {
+  EmailQueueService,
+  type WrittenEmail,
+} from '../../core/email/email-queue.service.js';
+import {
+  EmailRecipientsService,
+  type Person,
+} from '../../core/email/email-recipients.service.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import * as rules from '../../core/rbac/access-rules.js';
 import type { SubmissionAccess } from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
+import { PaperRagService } from '../ai/paper-rag.service.js';
 import type { PaperContext } from '../submissions/submission-emails.service.js';
 import { paperId } from '../submissions/submission.mapper.js';
 import { SubmissionsRepository } from '../submissions/submissions.repository.js';
 import { SubmissionsService } from '../submissions/submissions.service.js';
 import type {
+  DecideExtensionDto,
+  MessageReviewerDto,
+  RemindReviewerDto,
+  SetDueDateDto,
+  RequestExtensionDto,
   ReviewFormResponse,
   AssignmentResponse,
   AssignReviewersDto,
@@ -84,6 +96,7 @@ export class ReviewsService {
     private readonly recipients: EmailRecipientsService,
     private readonly reviewEmails: ReviewEmailsService,
     private readonly audit: AuditService,
+    private readonly rag: PaperRagService,
   ) {}
 
   // Reading -----------------------------------------------------------------------------------
@@ -333,6 +346,23 @@ export class ReviewsService {
    * was taken off the paper gets it again; someone who already has it is left as they are.
    */
   async assign(
+    user: AuthUser,
+    submissionId: string,
+    dto: AssignReviewersDto,
+    client: ClientInfo,
+  ): Promise<PaperReviewsResponse> {
+    const result = await this.assignInTransaction(
+      user,
+      submissionId,
+      dto,
+      client,
+    );
+    // The reviewers will want to read about the paper first: its summary is written now, in the background.
+    this.rag.summarizeLater(submissionId, user.id);
+    return result;
+  }
+
+  private async assignInTransaction(
     user: AuthUser,
     submissionId: string,
     dto: AssignReviewersDto,
@@ -636,6 +666,411 @@ export class ReviewsService {
         },
       );
       return this.reloadAssignment(tx, user, assignment.id, access);
+    });
+  }
+
+  /**
+   * "Ask for more time": the reviewer asks a chair to move their deadline on one paper. One
+   * request may wait at a time; the chairs are told (bell and email).
+   */
+  async requestExtension(
+    user: AuthUser,
+    assignmentId: string,
+    dto: RequestExtensionDto,
+    client: ClientInfo,
+  ): Promise<AssignmentResponse> {
+    return this.database.transaction(async (tx) => {
+      const { assignment, access, submission } = await this.ownAssignment(
+        tx,
+        user,
+        assignmentId,
+      );
+      if (assignment.status === 'submitted') {
+        throw AppException.businessRule(
+          'Your review is already sent, so there is no deadline to move.',
+        );
+      }
+      if (
+        assignment.status !== 'assigned' &&
+        assignment.status !== 'accepted'
+      ) {
+        throw AppException.businessRule(
+          'This paper is no longer assigned to you.',
+        );
+      }
+      if (submission.status === 'withdrawn') {
+        throw AppException.businessRule('This paper has been withdrawn.');
+      }
+      if (!rules.canEditOwnReview(access)) {
+        throw AppException.businessRule(
+          'The paper already has a decision, so its review deadline no longer matters.',
+        );
+      }
+      if (await this.reviews.openExtension(tx, assignment.id)) {
+        throw AppException.businessRule(
+          'You already have a request waiting for the chair.',
+        );
+      }
+      const [conference] = await tx
+        .select({ reviewDeadline: conferences.reviewDeadline })
+        .from(conferences)
+        .where(eq(conferences.id, submission.conferenceId));
+      const current = assignment.dueAt ?? conference?.reviewDeadline ?? null;
+      const currentDay = current ? current.toISOString().slice(0, 10) : null;
+      if (dto.date < new Date().toISOString().slice(0, 10)) {
+        throw AppException.businessRule(
+          'Choose a date that is not in the past.',
+        );
+      }
+      if (currentDay && dto.date <= currentDay) {
+        throw AppException.businessRule(
+          `Choose a date after the current deadline (${currentDay}).`,
+        );
+      }
+      await this.reviews.insertExtension(tx, {
+        assignmentId: assignment.id,
+        requestedDate: dto.date,
+        reason: dto.reason ?? null,
+      });
+      const ctx = await this.context(
+        tx,
+        user,
+        submission.conferenceId,
+        submission.id,
+      );
+      const pid = paperId(ctx.conference.acronym, submission.paperNo);
+      await this.notifications.notifyChairs(tx, submission.conferenceId, {
+        kind: 'extension_request',
+        title: `${ctx.actor.name} asks for more time on ${pid}`,
+        body: `Until ${dto.date}${dto.reason ? `: ${dto.reason}` : ''}`,
+        submissionId: submission.id,
+        link: `/submissions/${pid}/chair/review`,
+      });
+      const chairs = await this.recipients.chairs(tx, submission.conferenceId);
+      const me = (await this.recipients.people(tx, [user.id])).get(user.id);
+      if (me) {
+        await this.emails.enqueue(
+          tx,
+          'review_extension_requested',
+          this.reviewEmails.extensionRequested(ctx, me, chairs, {
+            date: dto.date,
+            reason: dto.reason ?? null,
+            currentDue: currentDay,
+          }),
+          { sentBy: user.id },
+        );
+      }
+      await this.record(
+        tx,
+        user,
+        client,
+        'review.extension_requested',
+        'submission',
+        submission.id,
+        { assignmentId, date: dto.date },
+      );
+      return this.reloadAssignment(tx, user, assignment.id, access);
+    });
+  }
+
+  /** A chair moves one reviewer's deadline on one paper; the reviewer is told (bell and email). */
+  async setDueDate(
+    user: AuthUser,
+    assignmentId: string,
+    dto: SetDueDateDto,
+    client: ClientInfo,
+  ): Promise<AssignmentResponse> {
+    return this.database.transaction(async (tx) => {
+      const assignment = await this.reviews.assignmentForUpdate(
+        tx,
+        assignmentId,
+      );
+      const access =
+        assignment &&
+        (await this.access.submissionAccess(user, assignment.submissionId, tx));
+      if (
+        !assignment ||
+        !access ||
+        !rules.canViewSubmission(access) ||
+        !rules.canManageReviews(access)
+      ) {
+        throw AppException.notFound('The review assignment');
+      }
+      if (
+        assignment.status !== 'assigned' &&
+        assignment.status !== 'accepted'
+      ) {
+        throw AppException.businessRule(
+          'This reviewer has already sent the review, or is no longer on the paper.',
+        );
+      }
+      if (dto.date < new Date().toISOString().slice(0, 10)) {
+        throw AppException.businessRule(
+          'Choose a date that is not in the past.',
+        );
+      }
+      await this.reviews.updateAssignment(tx, assignment.id, {
+        dueAt: new Date(`${dto.date}T23:59:59Z`),
+      });
+      const submission = (await this.submissions.findForUpdate(
+        tx,
+        assignment.submissionId,
+      ))!;
+      const ctx = await this.context(
+        tx,
+        user,
+        submission.conferenceId,
+        submission.id,
+      );
+      const pid = paperId(ctx.conference.acronym, submission.paperNo);
+      await this.notifications.notify(tx, [assignment.reviewerId], {
+        kind: 'due_date_changed',
+        title: `New review deadline for ${pid}: ${dto.date}`,
+        body: null,
+        conferenceId: submission.conferenceId,
+        submissionId: submission.id,
+        link: `/reviews/${assignment.id}`,
+      });
+      const reviewer = (
+        await this.recipients.people(tx, [assignment.reviewerId])
+      ).get(assignment.reviewerId);
+      if (reviewer) {
+        await this.emails.enqueue(
+          tx,
+          'review_due_date_changed',
+          this.reviewEmails.dueDateChanged(ctx, reviewer, dto.date),
+          { sentBy: user.id },
+        );
+      }
+      await this.record(
+        tx,
+        user,
+        client,
+        'review.due_date_changed',
+        'submission',
+        submission.id,
+        { assignmentId: assignment.id, date: dto.date },
+      );
+      return this.reloadAssignment(tx, user, assignment.id, null);
+    });
+  }
+
+  /** The chair reminds one reviewer about one paper (bell and email); only while the review is not sent. */
+  async remind(
+    user: AuthUser,
+    assignmentId: string,
+    dto: RemindReviewerDto,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.tellReviewer(user, assignmentId, client, {
+      action: 'review.reminded',
+      kind: 'review_reminder',
+      event: 'review_reminder',
+      title: (pid) => `Reminder: your review of ${pid} is waiting`,
+      body: dto.note || null,
+      email: (ctx, reviewer, due) =>
+        this.reviewEmails.reminder(ctx, reviewer, {
+          dueAt: due,
+          note: dto.note || null,
+        }),
+    });
+  }
+
+  /** The chair writes to one reviewer about one paper (bell and email). */
+  async messageReviewer(
+    user: AuthUser,
+    assignmentId: string,
+    dto: MessageReviewerDto,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.tellReviewer(user, assignmentId, client, {
+      action: 'review.messaged',
+      kind: 'reviewer_message',
+      event: 'reviewer_message',
+      title: (pid) => `Message from the chair about ${pid}`,
+      body: dto.message,
+      email: (ctx, reviewer) =>
+        this.reviewEmails.chairMessage(ctx, reviewer, dto.message),
+    });
+  }
+
+  private async tellReviewer(
+    user: AuthUser,
+    assignmentId: string,
+    client: ClientInfo,
+    what: {
+      action: string;
+      kind: string;
+      event: string;
+      title: (paperId: string) => string;
+      body: string | null;
+      email: (
+        ctx: Awaited<ReturnType<ReviewsService['context']>>,
+        reviewer: Person,
+        due: Date | null,
+      ) => WrittenEmail;
+    },
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const assignment = await this.reviews.assignmentForUpdate(
+        tx,
+        assignmentId,
+      );
+      const access =
+        assignment &&
+        (await this.access.submissionAccess(user, assignment.submissionId, tx));
+      if (
+        !assignment ||
+        !access ||
+        !rules.canViewSubmission(access) ||
+        !rules.canManageReviews(access)
+      ) {
+        throw AppException.notFound('The review assignment');
+      }
+      if (
+        assignment.status !== 'assigned' &&
+        assignment.status !== 'accepted'
+      ) {
+        throw AppException.businessRule(
+          'This reviewer has already sent the review, or is no longer on the paper.',
+        );
+      }
+      const submission = (await this.submissions.findForUpdate(
+        tx,
+        assignment.submissionId,
+      ))!;
+      const ctx = await this.context(
+        tx,
+        user,
+        submission.conferenceId,
+        submission.id,
+      );
+      const pid = paperId(ctx.conference.acronym, submission.paperNo);
+      await this.notifications.notify(tx, [assignment.reviewerId], {
+        kind: what.kind,
+        title: what.title(pid),
+        body: what.body,
+        conferenceId: submission.conferenceId,
+        submissionId: submission.id,
+        link: `/reviews/${assignment.id}`,
+      });
+      const reviewer = (
+        await this.recipients.people(tx, [assignment.reviewerId])
+      ).get(assignment.reviewerId);
+      if (reviewer) {
+        await this.emails.enqueue(
+          tx,
+          what.event,
+          what.email(ctx, reviewer, assignment.dueAt ?? null),
+          { sentBy: user.id },
+        );
+      }
+      await this.record(
+        tx,
+        user,
+        client,
+        what.action,
+        'submission',
+        submission.id,
+        { assignmentId: assignment.id },
+      );
+    });
+  }
+
+  /**
+   * A chair answers a request: approving moves the reviewer's deadline on that paper to the date
+   * asked for; either way the reviewer is told. Only a request that is still waiting.
+   */
+  async decideExtension(
+    user: AuthUser,
+    extensionId: string,
+    dto: DecideExtensionDto,
+    client: ClientInfo,
+  ): Promise<AssignmentResponse> {
+    return this.database.transaction(async (tx) => {
+      const extension = await this.reviews.extensionForUpdate(tx, extensionId);
+      const bundle =
+        extension &&
+        (await this.reviews.assignmentOf(tx, extension.assignmentId));
+      const access =
+        bundle &&
+        (await this.access.submissionAccess(
+          user,
+          bundle.assignment.submissionId,
+          tx,
+        ));
+      if (
+        !extension ||
+        !bundle ||
+        !access ||
+        !rules.canViewSubmission(access) ||
+        !rules.canManageReviews(access)
+      ) {
+        throw AppException.notFound('The request');
+      }
+      if (extension.status !== 'pending') {
+        throw AppException.businessRule(
+          'This request has already been answered.',
+        );
+      }
+      await this.reviews.updateExtension(tx, extension.id, {
+        status: dto.approve ? 'approved' : 'declined',
+        decidedBy: user.id,
+        decidedAt: new Date(),
+        note: dto.note ?? null,
+      });
+      if (dto.approve) {
+        // The date asked for is the end of that day, like the conference's own deadlines.
+        await this.reviews.updateAssignment(tx, bundle.assignment.id, {
+          dueAt: new Date(`${extension.requestedDate}T23:59:59Z`),
+        });
+      }
+      const submission = (await this.submissions.findForUpdate(
+        tx,
+        bundle.assignment.submissionId,
+      ))!;
+      const ctx = await this.context(
+        tx,
+        user,
+        submission.conferenceId,
+        submission.id,
+      );
+      const pid = paperId(ctx.conference.acronym, submission.paperNo);
+      await this.notifications.notify(tx, [bundle.assignment.reviewerId], {
+        kind: 'extension_decision',
+        title: dto.approve
+          ? `More time approved for ${pid}: due ${extension.requestedDate}`
+          : `More time for ${pid} was not approved`,
+        body: dto.note ?? null,
+        conferenceId: submission.conferenceId,
+        submissionId: submission.id,
+        link: `/reviews/${bundle.assignment.id}`,
+      });
+      const reviewer = (
+        await this.recipients.people(tx, [bundle.assignment.reviewerId])
+      ).get(bundle.assignment.reviewerId);
+      if (reviewer) {
+        await this.emails.enqueue(
+          tx,
+          'review_extension_decided',
+          this.reviewEmails.extensionDecided(ctx, reviewer, {
+            approved: dto.approve,
+            date: extension.requestedDate,
+            note: dto.note ?? null,
+          }),
+          { sentBy: user.id },
+        );
+      }
+      await this.record(
+        tx,
+        user,
+        client,
+        dto.approve ? 'review.extension_approved' : 'review.extension_declined',
+        'submission',
+        submission.id,
+        { assignmentId: bundle.assignment.id, date: extension.requestedDate },
+      );
+      return this.reloadAssignment(tx, user, bundle.assignment.id, null);
     });
   }
 

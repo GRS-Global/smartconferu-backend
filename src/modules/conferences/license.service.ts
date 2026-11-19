@@ -1,0 +1,318 @@
+import { Injectable } from '@nestjs/common';
+import { and, desc, eq, sql } from 'drizzle-orm';
+import { AuditService } from '../../core/audit/audit.service.js';
+import type { AuthUser } from '../../core/auth/auth-user.js';
+import { DatabaseService } from '../../core/database/database.service.js';
+import type { Executor, Tx } from '../../core/database/database.types.js';
+import {
+  conferences,
+  licenseRequests,
+  profiles,
+  users,
+} from '../../core/database/schema/index.js';
+import { AppException } from '../../core/errors/app.exception.js';
+import type { ClientInfo } from '../../core/http/client-info.js';
+import { NotificationsService } from '../../core/notifications/notifications.service.js';
+import { canManageConference } from '../../core/rbac/access-rules.js';
+import { AccessService } from '../../core/rbac/access.service.js';
+import type {
+  AdminLicenseRequestResponse,
+  LicenseRequestResponse,
+  LicenseStatus,
+  RequestLicenseDto,
+} from './dto/license.dto.js';
+
+/** A new conference's license runs this long from the day it was created, until a Super Admin moves it. */
+const TRIAL_DAYS = 30;
+
+type RequestRow = typeof licenseRequests.$inferSelect;
+
+const day = (d: Date) => d.toISOString().slice(0, 10);
+const addDays = (isoDay: string, days: number) => {
+  const d = new Date(`${isoDay}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return day(d);
+};
+
+function toResponse(row: RequestRow): LicenseRequestResponse {
+  return {
+    id: row.id,
+    requestedDate: row.requestedDate,
+    reason: row.reason,
+    status: row.status as LicenseStatus,
+    decisionReason: row.decisionReason,
+    newExpiry: row.newExpiry,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/** The license date of a conference and the requests to move it. */
+@Injectable()
+export class LicenseService {
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly access: AccessService,
+    private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
+  ) {}
+
+  private async requireChair(tx: Tx, user: AuthUser, conferenceId: string) {
+    const access = await this.access.requireConference(user, conferenceId, tx);
+    if (!canManageConference(access)) {
+      throw AppException.forbidden(
+        'Only a chair of this conference can do this.',
+      );
+    }
+    return access;
+  }
+
+  /** The conference's license end: what a Super Admin set, else 30 days from its creation. */
+  private expiryOf(conference: { details: unknown; createdAt: Date }): string {
+    const set = (conference.details as Record<string, unknown>).licenseExpiry;
+    return typeof set === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(set)
+      ? set
+      : addDays(day(conference.createdAt), TRIAL_DAYS);
+  }
+
+  private async conference(executor: Executor, conferenceId: string) {
+    const [row] = await executor
+      .select({
+        id: conferences.id,
+        acronym: conferences.acronym,
+        details: conferences.details,
+        createdAt: conferences.createdAt,
+        status: conferences.status,
+      })
+      .from(conferences)
+      .where(eq(conferences.id, conferenceId));
+    if (!row) {
+      throw AppException.notFound('The conference');
+    }
+    return row;
+  }
+
+  /** The latest request of the conference (a chair), or null. */
+  async latest(
+    user: AuthUser,
+    conferenceId: string,
+  ): Promise<LicenseRequestResponse | null> {
+    return this.database.transaction(async (tx) => {
+      await this.requireChair(tx, user, conferenceId);
+      const [row] = await tx
+        .select()
+        .from(licenseRequests)
+        .where(eq(licenseRequests.conferenceId, conferenceId))
+        .orderBy(desc(licenseRequests.createdAt))
+        .limit(1);
+      return row ? toResponse(row) : null;
+    });
+  }
+
+  async request(
+    user: AuthUser,
+    conferenceId: string,
+    dto: RequestLicenseDto,
+    client: ClientInfo,
+  ): Promise<LicenseRequestResponse> {
+    return this.database.transaction(async (tx) => {
+      const access = await this.requireChair(tx, user, conferenceId);
+      if (access.status === 'rejected' || access.status === 'deleted') {
+        throw AppException.businessRule(
+          'This conference was declined or deleted.',
+        );
+      }
+      const conference = await this.conference(tx, conferenceId);
+      const today = day(new Date());
+      const current = this.expiryOf(conference);
+      const floor = current > today ? current : today;
+      if (dto.requestedDate <= floor) {
+        throw AppException.businessRule(`Pick a date after ${floor}.`);
+      }
+      const [open] = await tx
+        .select({ id: licenseRequests.id })
+        .from(licenseRequests)
+        .where(
+          and(
+            eq(licenseRequests.conferenceId, conferenceId),
+            eq(licenseRequests.status, 'pending'),
+          ),
+        );
+      if (open) {
+        throw AppException.conflict(
+          'An extension request for this conference is already waiting for the Super Admin.',
+        );
+      }
+      const [row] = await tx
+        .insert(licenseRequests)
+        .values({
+          conferenceId,
+          requestedBy: user.id,
+          requestedDate: dto.requestedDate,
+          reason: dto.reason ?? null,
+        })
+        .returning();
+      await this.notifications.notifySuperAdmins(tx, {
+        kind: 'license_request',
+        title: `License extension requested: ${conference.acronym}`,
+        body: `Until ${dto.requestedDate}${dto.reason ? ` — ${dto.reason}` : ''}`,
+        conferenceId,
+      });
+      await this.audit.record(
+        {
+          action: 'conference.license_requested',
+          actorId: user.id,
+          entityType: 'conference',
+          entityId: conferenceId,
+          client,
+          data: { requestedDate: dto.requestedDate },
+        },
+        tx,
+      );
+      return toResponse(row);
+    });
+  }
+
+  async withdraw(
+    user: AuthUser,
+    conferenceId: string,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      await this.requireChair(tx, user, conferenceId);
+      const closed = await tx
+        .update(licenseRequests)
+        .set({ status: 'withdrawn', decidedAt: new Date() })
+        .where(
+          and(
+            eq(licenseRequests.conferenceId, conferenceId),
+            eq(licenseRequests.status, 'pending'),
+          ),
+        )
+        .returning({ id: licenseRequests.id });
+      if (closed.length === 0) {
+        throw AppException.businessRule(
+          'There is no open extension request for this conference.',
+        );
+      }
+      await this.audit.record(
+        {
+          action: 'conference.license_withdrawn',
+          actorId: user.id,
+          entityType: 'conference',
+          entityId: conferenceId,
+          client,
+        },
+        tx,
+      );
+    });
+  }
+
+  // Super admins ---------------------------------------------------------------------------------
+
+  async list(status: LicenseStatus): Promise<AdminLicenseRequestResponse[]> {
+    const rows = await this.database.db
+      .select({
+        request: licenseRequests,
+        slug: conferences.slug,
+        acronym: conferences.acronym,
+        title: conferences.title,
+        details: conferences.details,
+        confCreatedAt: conferences.createdAt,
+        firstName: profiles.firstName,
+        lastName: profiles.lastName,
+        email: users.email,
+      })
+      .from(licenseRequests)
+      .innerJoin(conferences, eq(conferences.id, licenseRequests.conferenceId))
+      .innerJoin(users, eq(users.id, licenseRequests.requestedBy))
+      .leftJoin(profiles, eq(profiles.id, users.id))
+      .where(eq(licenseRequests.status, status))
+      .orderBy(desc(licenseRequests.createdAt));
+    return rows.map((r) => ({
+      ...toResponse(r.request),
+      conferenceId: r.request.conferenceId,
+      conferenceSlug: r.slug,
+      conferenceAcronym: r.acronym,
+      conferenceTitle: r.title,
+      currentExpiry:
+        typeof (r.details as Record<string, unknown>).licenseExpiry === 'string'
+          ? ((r.details as Record<string, unknown>).licenseExpiry as string)
+          : null,
+      requestedByName:
+        [r.firstName, r.lastName].filter(Boolean).join(' ') ||
+        r.email ||
+        'Unknown',
+      requestedByEmail: r.email,
+    }));
+  }
+
+  /** Approve: the license runs until the date (default: the date asked for). Decline: with a reason. */
+  async decide(
+    admin: AuthUser,
+    requestId: string,
+    approve: boolean,
+    newExpiry: string | undefined,
+    reason: string | null | undefined,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(licenseRequests)
+        .where(eq(licenseRequests.id, requestId))
+        .for('update');
+      if (!request) {
+        throw AppException.notFound('The extension request');
+      }
+      if (request.status !== 'pending') {
+        throw AppException.businessRule(
+          'This request is no longer waiting for an answer.',
+        );
+      }
+      const conference = await this.conference(tx, request.conferenceId);
+      const until = approve ? (newExpiry ?? request.requestedDate) : null;
+      if (until && until <= day(new Date())) {
+        throw AppException.businessRule('Choose a date in the future.');
+      }
+      await tx
+        .update(licenseRequests)
+        .set({
+          status: approve ? 'approved' : 'declined',
+          newExpiry: until,
+          decisionReason: reason ?? null,
+          decidedBy: admin.id,
+          decidedAt: new Date(),
+        })
+        .where(eq(licenseRequests.id, requestId));
+      if (until) {
+        await tx
+          .update(conferences)
+          .set({
+            details: sql`${conferences.details} || ${JSON.stringify({ licenseExpiry: until })}::jsonb`,
+            updatedAt: new Date(),
+          })
+          .where(eq(conferences.id, request.conferenceId));
+      }
+      await this.notifications.notifyChairs(tx, request.conferenceId, {
+        kind: 'license_decision',
+        title: approve
+          ? `License extended to ${until}`
+          : 'License extension not approved',
+        body: approve ? conference.acronym : (reason ?? conference.acronym),
+      });
+      await this.audit.record(
+        {
+          action: approve
+            ? 'conference.license_extended'
+            : 'conference.license_declined',
+          actorId: admin.id,
+          entityType: 'conference',
+          entityId: request.conferenceId,
+          client,
+          data: until ? { newExpiry: until } : undefined,
+        },
+        tx,
+      );
+    });
+  }
+}

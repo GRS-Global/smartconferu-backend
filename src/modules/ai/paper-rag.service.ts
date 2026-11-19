@@ -33,7 +33,7 @@ import {
   textOf,
   usageOf,
 } from './ai-core.service.js';
-import type { ChatTurnDto } from './dto/ai.dto.js';
+import type { ChatTurnDto, PaperSummaryResponse } from './dto/ai.dto.js';
 import { chunkPaper, pdfToText } from './paper-text.js';
 
 export const DIGEST_MODEL = 'claude-haiku-5-5';
@@ -355,7 +355,27 @@ export class PaperRagService {
       );
     });
 
-    // The digest. If it can't be written the chunks are kept and the next run tries again.
+    const digestSaved = await this.makeDigest(paper, file, text, usage);
+    return { chunks: chunks.length, digest: digestSaved, fileId: file.id };
+  }
+
+  /**
+   * The digest (summary and key points): Claude reads the paper's text and the result is stored for the
+   * paper's latest version. Never throws: when it can't be written, false comes back (and the usage
+   * records the error).
+   */
+  private async makeDigest(
+    paper: { title: string; abstract: string | null },
+    file: { id: string },
+    text: string,
+    usage: {
+      userId: string | null;
+      conferenceId: string;
+      submissionId: string;
+    },
+  ): Promise<boolean> {
+    const db = this.database.db;
+    const submissionId = usage.submissionId;
     let digestSaved = false;
     try {
       const message = await this.ai.claude('Paper AI').messages.create({
@@ -418,7 +438,175 @@ export class PaperRagService {
       });
       this.logger.warn({ err: error, submissionId }, 'Paper digest failed');
     }
-    return { chunks: chunks.length, digest: digestSaved, fileId: file.id };
+    return digestSaved;
+  }
+
+  /** The paper's latest PDF version (404 / 409 / 422 when there is none to read). */
+  private async latestPdf(submissionId: string) {
+    const db = this.database.db;
+    const [paper] = await db
+      .select({
+        conferenceId: submissions.conferenceId,
+        title: submissions.title,
+        abstract: submissions.abstract,
+      })
+      .from(submissions)
+      .where(eq(submissions.id, submissionId));
+    if (!paper) {
+      throw AppException.notFound('The paper');
+    }
+    const [file] = await db
+      .select()
+      .from(submissionFiles)
+      .where(
+        and(
+          eq(submissionFiles.submissionId, submissionId),
+          inArray(submissionFiles.kind, ['paper', 'revision']),
+        ),
+      )
+      .orderBy(desc(submissionFiles.version))
+      .limit(1);
+    if (!file) {
+      throw notReady('This paper has no file yet.');
+    }
+    if (!/\.pdf$/i.test(file.fileName)) {
+      throw AppException.businessRule(
+        'Only PDF papers can be summarised for now.',
+      );
+    }
+    return { paper, file };
+  }
+
+  /**
+   * Writes the paper's summary (the digest) from its latest version, without the embeddings the chat
+   * needs, so it works even when only Claude is set up. Nothing happens when the stored one is for
+   * this version already (unless `force`).
+   */
+  async summarize(
+    submissionId: string,
+    { force, userId }: { force: boolean; userId: string | null },
+  ): Promise<{ skipped?: boolean; saved?: boolean }> {
+    const { paper, file } = await this.latestPdf(submissionId);
+    if (!force) {
+      const [digest] = await this.database.db
+        .select({ fileId: paperDigests.fileId })
+        .from(paperDigests)
+        .where(eq(paperDigests.submissionId, submissionId));
+      if (digest?.fileId === file.id) {
+        return { skipped: true };
+      }
+    }
+    const text = await pdfToText(await this.storage.get(file.storagePath));
+    if (chunkPaper(text).reduce((n, c) => n + c.words, 0) < 150) {
+      throw AppException.businessRule(
+        "This PDF has almost no text (it may be a scan), so it can't be summarised.",
+      );
+    }
+    const saved = await this.makeDigest(paper, file, text, {
+      userId,
+      conferenceId: paper.conferenceId,
+      submissionId,
+    });
+    if (!saved) {
+      throw new AppException(
+        HttpStatus.BAD_GATEWAY,
+        ErrorCode.AI_FAILED,
+        "The summary couldn't be written. Please try again.",
+      );
+    }
+    return { saved: true };
+  }
+
+  /** When a reviewer is given the paper: writes its summary in the background (nothing waits for it, a failure is only logged). */
+  summarizeLater(submissionId: string, userId: string | null): void {
+    if (!this.ai.configured) {
+      return;
+    }
+    setImmediate(() => {
+      this.summarize(submissionId, { force: false, userId }).catch(
+        (error: unknown) =>
+          this.logger.warn(
+            { err: error, submissionId },
+            'Paper summary not written',
+          ),
+      );
+    });
+  }
+
+  /** The stored summary of a paper (its chairs and assigned reviewers). */
+  async summaryFor(
+    user: AuthUser,
+    submissionId: string,
+  ): Promise<PaperSummaryResponse> {
+    const access = await this.access.requireSubmission(user, submissionId);
+    if (!rules.canUsePaperAi(access)) {
+      throw AppException.forbidden("You can't read this paper's summary.");
+    }
+    return this.readSummary(submissionId);
+  }
+
+  /** Writes the summary now (when there is none, it is for an older version, or `force`), then returns it. */
+  async summarizeFor(
+    user: AuthUser,
+    submissionId: string,
+    force: boolean,
+  ): Promise<PaperSummaryResponse> {
+    const access = await this.access.requireSubmission(user, submissionId);
+    if (!rules.canUsePaperAi(access)) {
+      throw AppException.forbidden("You can't summarise this paper.");
+    }
+    await this.summarize(submissionId, { force, userId: user.id });
+    return this.readSummary(submissionId);
+  }
+
+  private async readSummary(
+    submissionId: string,
+  ): Promise<PaperSummaryResponse> {
+    const db = this.database.db;
+    const [digest] = await db
+      .select()
+      .from(paperDigests)
+      .where(eq(paperDigests.submissionId, submissionId));
+    if (!digest) {
+      return {
+        status: 'none',
+        summary: null,
+        claims: [],
+        methods: [],
+        datasets: [],
+        limitations: [],
+        model: null,
+        updatedAt: null,
+        upToDate: false,
+      };
+    }
+    const [latest] = await db
+      .select({ id: submissionFiles.id })
+      .from(submissionFiles)
+      .where(
+        and(
+          eq(submissionFiles.submissionId, submissionId),
+          inArray(submissionFiles.kind, ['paper', 'revision']),
+        ),
+      )
+      .orderBy(desc(submissionFiles.version))
+      .limit(1);
+    const k = (digest.keyPoints ?? {}) as Partial<Digest>;
+    const list = (v: unknown): string[] =>
+      Array.isArray(v)
+        ? v.filter((x): x is string => typeof x === 'string')
+        : [];
+    return {
+      status: 'ready',
+      summary: digest.summary,
+      claims: list(k.claims),
+      methods: list(k.methods),
+      datasets: list(k.datasets),
+      limitations: list(k.limitations),
+      model: digest.model,
+      updatedAt: digest.updatedAt.toISOString(),
+      upToDate: latest?.id === digest.fileId,
+    };
   }
 
   /** The stored digest as prompt text ('' when the paper isn't prepared). */

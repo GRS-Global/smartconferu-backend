@@ -6,8 +6,10 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
@@ -20,6 +22,7 @@ import {
 import {
   assignmentStatus,
   decisionOutcome,
+  extensionStatus,
   reviewStatus,
 } from '../../../core/database/schema/index.js';
 import { IsJsonObjectOfSize } from '../../../core/validation/validators.js';
@@ -29,6 +32,8 @@ import type {
   ReviewStatus,
 } from '../../../core/rbac/access-rules.js';
 import { SubmissionResponse } from '../../submissions/dto/submission.dto.js';
+
+type ExtensionStatus = (typeof extensionStatus.enumValues)[number];
 
 const trimToNull = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() || null : value;
@@ -244,6 +249,17 @@ export class ReviewerResponse {
   @ApiProperty({ nullable: true, type: String }) email: string | null;
 }
 
+export class ExtensionResponse {
+  @ApiProperty({ format: 'uuid' }) id: string;
+  @ApiProperty({ example: '2027-02-10' }) date: string;
+  @ApiProperty({ nullable: true, type: String }) reason: string | null;
+  @ApiProperty({ enum: extensionStatus.enumValues }) status: ExtensionStatus;
+  @ApiProperty({ nullable: true, type: String }) note: string | null;
+  @ApiProperty({ format: 'date-time' }) createdAt: string;
+  @ApiProperty({ nullable: true, type: String, format: 'date-time' })
+  decidedAt: string | null;
+}
+
 export class AssignmentCan {
   @ApiProperty({ description: 'Accept or decline the paper.' })
   respond: boolean;
@@ -267,6 +283,12 @@ export class AssignmentResponse {
   @ApiProperty({ nullable: true, type: String }) declineReason: string | null;
   @ApiProperty({ nullable: true, type: ReviewResponse })
   review: ReviewResponse | null;
+  @ApiProperty({
+    nullable: true,
+    type: ExtensionResponse,
+    description: 'The latest "Ask for more time" on this paper, in any state.',
+  })
+  extension: ExtensionResponse | null;
   @ApiProperty({ type: AssignmentCan }) can: AssignmentCan;
 }
 
@@ -448,4 +470,74 @@ export class ReviewFormResponse {
       'The decision the chair has sent to the authors (reviewers hear it when the authors do); null before.',
   })
   decision: SentDecisionResponse | null;
+}
+
+export class RequestExtensionDto {
+  @ApiProperty({
+    example: '2027-02-10',
+    description:
+      'The new deadline asked for (YYYY-MM-DD): after the current one and not in the past.',
+  })
+  @IsDateString({ strict: true }, { message: 'Choose a date.' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Choose a date (YYYY-MM-DD).' })
+  date: string;
+
+  @ApiPropertyOptional({ nullable: true, type: String, maxLength: 1000 })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(1000)
+  reason?: string | null;
+}
+
+export class SetDueDateDto {
+  @ApiProperty({
+    example: '2027-02-10',
+    description:
+      "The reviewer's new deadline on this paper (YYYY-MM-DD, not in the past).",
+  })
+  @IsDateString({ strict: true }, { message: 'Choose a date.' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Choose a date (YYYY-MM-DD).' })
+  date: string;
+}
+
+export class RemindReviewerDto {
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    description: 'A line added to the reminder.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MaxLength(2000)
+  note?: string;
+}
+
+export class MessageReviewerDto {
+  @ApiProperty({ maxLength: 5000 })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @IsNotEmpty({ message: 'Write a message.' })
+  @MaxLength(5000)
+  message: string;
+}
+
+export class DecideExtensionDto {
+  @ApiProperty({
+    description:
+      "true moves the reviewer's deadline to the date asked for; false declines.",
+  })
+  @IsBoolean()
+  approve: boolean;
+
+  @ApiPropertyOptional({ nullable: true, type: String, maxLength: 1000 })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
 }
