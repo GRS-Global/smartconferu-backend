@@ -99,6 +99,13 @@
       "when": 1795154421756,
       "tag": "0013_conference_suspension",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795172053608,
+      "tag": "0014_conference_tour_seen",
+      "breakpoints": true
     }
   ]
 }

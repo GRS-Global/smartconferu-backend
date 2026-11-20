@@ -17,6 +17,8 @@ import { LicenseService } from './license.service.js';
 import { MembersRepository } from './members.repository.js';
 import { MembersService } from './members.service.js';
 import { PublicConferencesController } from './public-conferences.controller.js';
+import { ConferenceTourController } from './tour.controller.js';
+import { TourService } from './tour.service.js';
 
 /** Conferences, their Call for Papers and their team. */
 @Module({
@@ -27,6 +29,7 @@ import { PublicConferencesController } from './public-conferences.controller.js'
     ConferenceAdminController,
     ConferenceLicenseController,
     AdminLicenseController,
+    ConferenceTourController,
   ],
   providers: [
     ConferenceEmailsService,
@@ -35,6 +38,7 @@ import { PublicConferencesController } from './public-conferences.controller.js'
     ActivityService,
     MyActivityService,
     LicenseService,
+    TourService,
     MembersService,
     ConferenceAdminService,
     ConferencesRepository,

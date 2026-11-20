@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   uniqueIndex,
   uuid,
@@ -225,4 +226,22 @@ export const licenseRequests = pgTable(
       sql`${t.status} in ('pending', 'approved', 'declined', 'withdrawn')`,
     ),
   ],
+);
+
+/**
+ * "Take a tour" is shown by itself only the first time a person opens a conference (as its chair);
+ * this row is the memory of that, kept with the account so it holds on every device.
+ */
+export const conferenceTourSeen = pgTable(
+  'conference_tour_seen',
+  {
+    conferenceId: uuid('conference_id')
+      .notNull()
+      .references(() => conferences.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    seenAt: timestamptz('seen_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.conferenceId, t.userId] })],
 );
