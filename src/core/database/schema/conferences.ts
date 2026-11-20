@@ -59,6 +59,8 @@ export const conferences = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: timestamptz('deleted_at'),
+    /** Set while a Super Admin has suspended the conference: read-only for everyone else. */
+    suspendedAt: timestamptz('suspended_at'),
   },
   (t) => [
     uniqueIndex('conferences_slug_key').on(t.slug),

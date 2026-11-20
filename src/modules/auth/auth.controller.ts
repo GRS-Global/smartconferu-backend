@@ -23,7 +23,12 @@ import type { Request, Response } from 'express';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser, Public } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
-import { AuthCookies, MFA_COOKIE, REFRESH_COOKIE } from './auth-cookies.js';
+import {
+  AuthCookies,
+  MFA_COOKIE,
+  REFRESH_COOKIE,
+  TRUSTED_DEVICE_COOKIE,
+} from './auth-cookies.js';
 import {
   AuthService,
   type SignInOutcome,
@@ -35,9 +40,11 @@ import {
   MessageResponse,
   MfaCodeDto,
   MfaRequiredResponse,
+  DevCodeResponse,
   RegisterDto,
   ResetPasswordDto,
   SessionResponse,
+  PasswordSignInDto,
   SignInDto,
   SignInWithCodeDto,
   TokenDto,
@@ -118,13 +125,17 @@ export class AuthController {
   @ApiOperation({ summary: 'Sign in with email and password' })
   @ApiOkResponse(SIGN_IN_RESPONSE)
   async signIn(
-    @Body() dto: SignInDto,
+    @Body() dto: PasswordSignInDto,
+    @Req() req: Request,
     @Client() client: ClientInfo,
     @Res({ passthrough: true }) res: Response,
   ): Promise<SessionResponse | MfaRequiredResponse> {
     return this.respond(
       res,
-      await this.auth.signInWithPassword(dto.email, dto.password, client),
+      await this.auth.signInWithPassword(dto.email, dto.password, client, {
+        remember: dto.remember,
+        trustedDeviceToken: this.cookies.read(req, TRUSTED_DEVICE_COOKIE),
+      }),
     );
   }
 
@@ -174,22 +185,53 @@ export class AuthController {
       this.cookies.read(req, MFA_COOKIE),
       dto.code,
       client,
+      dto.trustDevice ?? false,
     );
     this.cookies.clear(res, MFA_COOKIE);
+    if (session.trustedDevice) {
+      this.cookies.setTrustedDevice(
+        res,
+        session.trustedDevice.token,
+        session.trustedDevice.expiresAt,
+      );
+    }
     return this.withSession(res, session);
   }
 
   @Public()
-  @Post('mfa/email-code')
+  @Post('trusted-device/forget')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth(TRUSTED_DEVICE_COOKIE)
+  @ApiOperation({
+    summary:
+      '"Forget this device": the emailed admin code is asked again at the next sign-in',
+  })
+  @ApiNoContentResponse()
+  async forgetTrustedDevice(
+    @Req() req: Request,
+    @Client() client: ClientInfo,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    this.cookies.assertAllowedOrigin(req);
+    await this.auth.forgetTrustedDevice(
+      this.cookies.read(req, TRUSTED_DEVICE_COOKIE),
+      client,
+    );
+    this.cookies.clear(res, TRUSTED_DEVICE_COOKIE);
+  }
+
+  @Public()
+  @Post('mfa/email-code')
+  @HttpCode(HttpStatus.OK)
   @ApiCookieAuth(MFA_COOKIE)
   @ApiOperation({
     summary:
       'Email a new code for a pending sign-in whose second step is an emailed code (factor: email)',
   })
-  async resendMfaEmailCode(@Req() req: Request): Promise<void> {
+  @ApiOkResponse({ type: DevCodeResponse })
+  async resendMfaEmailCode(@Req() req: Request): Promise<DevCodeResponse> {
     this.cookies.assertAllowedOrigin(req);
-    await this.auth.resendMfaEmailCode(this.cookies.read(req, MFA_COOKIE));
+    return this.auth.resendMfaEmailCode(this.cookies.read(req, MFA_COOKIE));
   }
 
   @Public()
@@ -305,6 +347,7 @@ export class AuthController {
           outcome.factor === 'email'
             ? 'We emailed you a 6-digit code. Enter it to finish signing in.'
             : 'Enter the code from your authenticator app.',
+        ...(outcome.devCode ? { devCode: outcome.devCode } : {}),
       };
     }
     return this.withSession(res, outcome.session);
@@ -315,6 +358,7 @@ export class AuthController {
       res,
       session.refreshToken,
       session.refreshExpiresAt,
+      session.refreshPersistent,
     );
     return {
       accessToken: session.accessToken,

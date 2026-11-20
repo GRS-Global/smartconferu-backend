@@ -8,6 +8,7 @@ import {
   Matches,
   Max,
   MaxLength,
+  MinLength,
   Min,
 } from 'class-validator';
 import { PageQuery } from '../../../core/http/pagination.js';
@@ -56,6 +57,41 @@ export class ActivityQuery {
   @IsOptional()
   @IsUUID()
   actorId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Only entries about this thing (e.g. a conference id).',
+  })
+  @IsOptional()
+  @IsUUID()
+  entityId?: string;
+
+  @ApiPropertyOptional({
+    format: 'date',
+    example: '2026-11-01',
+    description: 'From this day (inclusive, UTC).',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @ApiPropertyOptional({
+    format: 'date',
+    example: '2026-11-30',
+    description: 'Up to this day (inclusive, UTC).',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 100,
+    description: 'Words in the action, its details, or who did it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
 }
 
 class ConferenceCounts {
@@ -237,4 +273,75 @@ export class AdminPaperResponse {
   @ApiProperty({ type: [AdminPaperReviewer] }) reviewers: AdminPaperReviewer[];
   @ApiProperty({ format: 'date-time' }) submittedAt: string;
   @ApiProperty({ format: 'date-time' }) updatedAt: string;
+}
+
+export class AdminSessionResponse {
+  @ApiProperty({ format: 'uuid', description: 'The sign-in (session family).' })
+  id: string;
+  @ApiProperty({ format: 'date-time' }) signedInAt: string;
+  @ApiProperty({ format: 'date-time' }) lastActiveAt: string;
+  @ApiProperty({ nullable: true, type: String }) userAgent: string | null;
+  @ApiProperty({ nullable: true, type: String }) ipAddress: string | null;
+}
+
+export class MergeUsersDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'The account to merge into this one (it is closed).',
+  })
+  @IsUUID()
+  otherUserId: string;
+}
+
+export class ViewAsDto {
+  @ApiProperty({
+    maxLength: 500,
+    description: 'Why (kept in the activity log), e.g. a ticket number.',
+  })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
+}
+
+class ViewAsUser {
+  @ApiProperty({ format: 'uuid' }) id: string;
+  @ApiProperty() name: string;
+  @ApiProperty({ nullable: true, type: String }) email: string | null;
+}
+
+export class ViewAsResponse {
+  @ApiProperty({
+    description:
+      'A read-only access token for the user app as this person; it cannot be refreshed.',
+  })
+  accessToken: string;
+  @ApiProperty({ format: 'date-time' }) expiresAt: string;
+  @ApiProperty({ type: ViewAsUser }) user: ViewAsUser;
+}
+
+export class YearQuery {
+  @ApiPropertyOptional({ example: 2026, description: 'Default: this year.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2000)
+  @Max(2100)
+  year?: number;
+}
+
+class MonthActivity {
+  @ApiProperty({ example: 'Jan' }) month: string;
+  @ApiProperty() submissions: number;
+  @ApiProperty() reviews: number;
+}
+
+export class MonthlyActivityResponse {
+  @ApiProperty() year: number;
+  @ApiProperty({
+    type: [Number],
+    description: 'Years with data, newest first.',
+  })
+  years: number[];
+  @ApiProperty({ type: [MonthActivity] }) months: MonthActivity[];
 }

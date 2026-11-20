@@ -194,6 +194,39 @@ export class ConferenceEmailsService {
     );
   }
 
+  /** A super admin needs more before deciding a conference request ("Ask for info") → the chair who asked. */
+  async infoRequested(
+    executor: Executor,
+    conference: ConferenceFacts & { createdBy: string },
+    message: string,
+    adminId: string,
+  ): Promise<void> {
+    const chair = await this.one(executor, conference.createdBy);
+    if (!chair) {
+      return;
+    }
+    const requests = this.recipients.link('/conferences');
+    await this.queue.enqueue(
+      executor,
+      'conference_info_requested',
+      {
+        key: 'conferenceInfoRequested',
+        label: 'More information needed for a conference request',
+        recipientType: 'Chair',
+        conference: null,
+        to: chair,
+        subject: `About your request for ${conference.acronym}`,
+        body:
+          `<p>Dear ${escapeHtml(firstName(chair.name, chair.email))},</p>` +
+          `<p>Before we can approve your request to host <b>${escapeHtml(conference.acronym)}</b> on Smartconferu, we need a little more:</p>` +
+          `<p>“${escapeHtml(message)}”</p>` +
+          `<p>Please reply to this email or update your request from My Conferences:</p>` +
+          `<p><a href="${escapeHtml(requests)}" style="color:#4F46E5">${escapeHtml(requests)}</a></p>`,
+      },
+      { sentBy: adminId },
+    );
+  }
+
   /** A super admin decided a deletion request → the chair who asked. */
   async deletionDecided(
     executor: Executor,

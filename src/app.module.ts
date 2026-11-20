@@ -15,6 +15,8 @@ import { AllExceptionsFilter } from './core/errors/all-exceptions.filter.js';
 import { AppThrottlerGuard } from './core/http/app-throttler.guard.js';
 import { HealthController } from './core/health/health.controller.js';
 import { ConferenceRoleGuard } from './core/rbac/conference-role.guard.js';
+import { SupportViewGuard } from './core/rbac/support-view.guard.js';
+import { SuspensionGuard } from './core/rbac/suspension.guard.js';
 import { NotificationsModule } from './core/notifications/notifications.module.js';
 import { PlanModule } from './core/plan/plan.service.js';
 import { StorageModule } from './core/storage/storage.module.js';
@@ -113,10 +115,13 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
   ],
   controllers: [HealthController],
   providers: [
-    // Guards run in this order: rate limit, then sign-in, then conference role.
+    // Guards run in this order: rate limit, then sign-in, then conference role, then a suspended
+    // conference refusing changes.
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_GUARD, useExisting: JwtAuthGuard },
+    { provide: APP_GUARD, useExisting: SupportViewGuard },
     { provide: APP_GUARD, useExisting: ConferenceRoleGuard },
+    { provide: APP_GUARD, useExisting: SuspensionGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })

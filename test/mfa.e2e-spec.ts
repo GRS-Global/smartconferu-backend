@@ -202,6 +202,7 @@ describe('Two-step verification (authenticator app)', () => {
       const first = await signIn(admin);
       expect(first.body).toMatchObject({ mfaRequired: true, factor: 'email' });
       expect(first.body.accessToken).toBeUndefined();
+      expect(first.body.devCode).toBeUndefined();
       const mail = t.outbox().at(-1)!;
       expect(mail.to).toBe(admin.email);
       expect(mail.subject).toMatch(/admin sign-in code/);
@@ -214,7 +215,7 @@ describe('Two-step verification (authenticator app)', () => {
         .post('/api/v1/auth/mfa/email-code')
         .set('Origin', APP_ORIGIN)
         .set('Cookie', first.mfaCookie ?? '')
-        .expect(204);
+        .expect(200);
       const resent = t.outbox().at(-1)!;
       expect(resent.subject).not.toBe(mail.subject);
       await verify(first.mfaCookie, emailCode(mail.text)).expect(401);

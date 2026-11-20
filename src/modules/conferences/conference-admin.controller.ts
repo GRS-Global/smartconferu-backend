@@ -22,12 +22,17 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
 import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
+import { StepUp } from '../../core/rbac/step-up.guard.js';
 import { SuperAdminOnly } from '../../core/rbac/super-admin.guard.js';
 import { ConferenceAdminService } from './conference-admin.service.js';
+import { LicenseService } from './license.service.js';
 import {
   AdminConferenceResponse,
   ConferenceStatusQuery,
+  AskInfoDto,
   DecisionDto,
+  LicenseExpiryDto,
+  SuspendDto,
   DeletionRequestResponse,
 } from './dto/conference.dto.js';
 
@@ -61,7 +66,27 @@ class CfpStateQuery {
 @SuperAdminOnly()
 @Controller('admin')
 export class ConferenceAdminController {
-  constructor(private readonly admin: ConferenceAdminService) {}
+  constructor(
+    private readonly admin: ConferenceAdminService,
+    private readonly license: LicenseService,
+  ) {}
+
+  @Post('conferences/:conferenceId/license')
+  @StepUp()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Extend the license directly (the conference page): it runs until the date; the chairs are told',
+  })
+  @ApiNoContentResponse()
+  extendLicense(
+    @CurrentUser() user: AuthUser,
+    @ConferenceRef() conferenceId: string,
+    @Body() dto: LicenseExpiryDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    return this.license.setExpiry(user, conferenceId, dto.expiry, client);
+  }
 
   @Get('conferences')
   @ApiOperation({ summary: 'Every conference, with who asked for it' })
@@ -83,6 +108,58 @@ export class ConferenceAdminController {
     @Client() client: ClientInfo,
   ): Promise<void> {
     return this.admin.decide(user, conferenceId, dto.approve, dto.note, client);
+  }
+
+  @Post('conferences/:conferenceId/suspend')
+  @StepUp()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Suspend: read-only for its chairs, authors and reviewers until reactivated (needs a step-up)',
+  })
+  @ApiNoContentResponse()
+  suspend(
+    @CurrentUser() user: AuthUser,
+    @ConferenceRef() conferenceId: string,
+    @Body() dto: SuspendDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    return this.admin.setSuspended(
+      user,
+      conferenceId,
+      true,
+      dto.reason,
+      client,
+    );
+  }
+
+  @Post('conferences/:conferenceId/reactivate')
+  @StepUp()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Lift a suspension (needs a step-up)' })
+  @ApiNoContentResponse()
+  reactivate(
+    @CurrentUser() user: AuthUser,
+    @ConferenceRef() conferenceId: string,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    return this.admin.setSuspended(user, conferenceId, false, null, client);
+  }
+
+  @Post('conferences/:conferenceId/ask-info')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      '"Ask for info" on a conference request: the chair is notified and emailed; it stays waiting',
+  })
+  @ApiNoContentResponse()
+  askForInfo(
+    @CurrentUser() user: AuthUser,
+    @ConferenceRef() conferenceId: string,
+    @Body() dto: AskInfoDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    return this.admin.askForInfo(user, conferenceId, dto.message, client);
   }
 
   @Get('cfps')

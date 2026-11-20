@@ -519,13 +519,16 @@ describe('Frontend connection helpers', () => {
       };
       await send(author.token, message).expect(403);
       await send(chair.token, { ...message, body: '<p> </p>' }).expect(400);
-      await send(chair.token, { ...message, to: ['stranger@example.org'] }).expect(
-        422,
-      );
+      await send(chair.token, {
+        ...message,
+        to: ['stranger@example.org'],
+      }).expect(422);
       const done = await send(chair.token, message).expect(200);
       expect(done.body.queued).toBe(1);
       await t.sendQueuedEmails();
-      const mail = t.outbox().find((m) => m.to === author.email && /a question/.test(m.subject));
+      const mail = t
+        .outbox()
+        .find((m) => m.to === author.email && /a question/.test(m.subject));
       expect(mail).toBeDefined();
       expect(mail!.subject).toMatch(/^[A-Z0-9]+-\d+: a question$/);
       expect(mail!.html).toMatch(/Hi Ada, about Graph networks/);

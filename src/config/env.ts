@@ -106,6 +106,11 @@ const envSchema = z.object({
   EMAIL_QUEUE_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(50),
   /** Tries before an email is marked failed. */
   EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  /**
+   * Development only: put the admin sign-in code in the sign-in response (`devCode`) so the console
+   * can fill it in while no real emails are sent. Refused in production.
+   */
+  DEV_SHOW_EMAIL_CODES: bool.default(false),
 
   /** Claude, for the AI features. Without it they answer 503. */
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -160,6 +165,13 @@ export function validateEnv(raw: Record<string, unknown>): Env {
           code: 'custom',
           path: ['EMAIL_TRANSPORT'],
           message: 'must not be "log" in production',
+        });
+      }
+      if (env.NODE_ENV === 'production' && env.DEV_SHOW_EMAIL_CODES) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['DEV_SHOW_EMAIL_CODES'],
+          message: 'must be off in production',
         });
       }
     })

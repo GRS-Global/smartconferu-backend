@@ -71,6 +71,34 @@
       "when": 1795081328621,
       "tag": "0009_license_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795151410846,
+      "tag": "0010_keep_signed_in_and_trusted_devices",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795153675688,
+      "tag": "0011_admin_queue_claims_and_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795154023895,
+      "tag": "0012_step_up",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795154421756,
+      "tag": "0013_conference_suspension",
+      "breakpoints": true
     }
   ]
 }

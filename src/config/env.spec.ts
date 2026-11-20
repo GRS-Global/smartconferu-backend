@@ -72,4 +72,17 @@ describe('validateEnv', () => {
       validateEnv({ ...minimal, EMAIL_TRANSPORT: 'resend' }),
     ).toThrow(/RESEND_API_KEY: is required/);
   });
+
+  it('never shows sign-in codes in API responses in production', () => {
+    expect(validateEnv(minimal).DEV_SHOW_EMAIL_CODES).toBe(false);
+    expect(() =>
+      validateEnv({
+        ...minimal,
+        NODE_ENV: 'production',
+        EMAIL_TRANSPORT: 'resend',
+        RESEND_API_KEY: 're_x',
+        DEV_SHOW_EMAIL_CODES: 'true',
+      }),
+    ).toThrow(/DEV_SHOW_EMAIL_CODES: must be off in production/);
+  });
 });

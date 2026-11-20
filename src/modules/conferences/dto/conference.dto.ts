@@ -7,6 +7,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
   ValidateIf,
@@ -385,6 +386,60 @@ export class AdminConferenceResponse extends ConferenceResponse {
     email: string | null;
     affiliation: string | null;
   };
+
+  @ApiProperty({ description: 'Submitted papers (drafts not counted).' })
+  papers: number;
+
+  @ApiProperty({
+    format: 'date',
+    description:
+      'When the license ends: the date a Super Admin set, else 30 days after the conference was created.',
+  })
+  licenseExpiry: string;
+
+  @ApiProperty({
+    description:
+      'No license date set yet: the conference is on its 30-day trial.',
+  })
+  onTrial: boolean;
+
+  @ApiProperty({
+    description:
+      'Suspended by a Super Admin: read-only for everyone else until reactivated.',
+  })
+  suspended: boolean;
+}
+
+export class SuspendDto {
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    nullable: true,
+    type: String,
+    description: 'Why (shown to the chairs).',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(2000)
+  reason?: string | null;
+}
+
+export class AskInfoDto {
+  @ApiProperty({
+    maxLength: 2000,
+    description: 'The message to the chair who asked.',
+  })
+  @Transform(trimToNull)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  message: string;
+}
+
+export class LicenseExpiryDto {
+  @ApiProperty({ format: 'date', example: '2027-06-30' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Use a date like 2027-06-30.' })
+  expiry: string;
 }
 
 export class DeletionRequestResponse {

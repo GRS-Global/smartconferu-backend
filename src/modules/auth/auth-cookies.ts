@@ -9,6 +9,8 @@ import { API_PREFIX } from '../../setup-app.js';
 export const REFRESH_COOKIE = 'sc_refresh';
 export const MFA_COOKIE = 'sc_mfa';
 export const OAUTH_STATE_COOKIE = 'sc_oauth';
+/** "Trust this device" (admin console): skips the emailed code at the next sign-ins. */
+export const TRUSTED_DEVICE_COOKIE = 'sc_trusted';
 export const OAUTH_STATE_TTL_SECONDS = 600;
 
 /**
@@ -38,8 +40,22 @@ export class AuthCookies {
     ]);
   }
 
-  setRefresh(res: Response, token: string, expires: Date): void {
-    res.cookie(REFRESH_COOKIE, token, { ...this.base, expires });
+  /** `persistent` false ("Keep me signed in" off): a browser-session cookie, gone when it closes. */
+  setRefresh(
+    res: Response,
+    token: string,
+    expires: Date,
+    persistent = true,
+  ): void {
+    res.cookie(
+      REFRESH_COOKIE,
+      token,
+      persistent ? { ...this.base, expires } : this.base,
+    );
+  }
+
+  setTrustedDevice(res: Response, token: string, expires: Date): void {
+    res.cookie(TRUSTED_DEVICE_COOKIE, token, { ...this.base, expires });
   }
 
   setMfaChallenge(res: Response, token: string): void {

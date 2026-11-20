@@ -276,9 +276,7 @@ describe('License requests and Activity Logs', () => {
       expect(find(/Reminded a reviewer about ICX-1/)).toMatchObject({
         action: 'Sent',
       });
-      expect(
-        find(/Invited .*Viewer to the committee as/i),
-      ).toMatchObject({
+      expect(find(/Invited .*Viewer to the committee as/i)).toMatchObject({
         module: 'Committee',
         actorRole: 'chair',
       });

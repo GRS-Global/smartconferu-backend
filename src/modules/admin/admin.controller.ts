@@ -25,6 +25,8 @@ import { AdminService } from './admin.service.js';
 import {
   ActivityPage,
   ActivityQuery,
+  MonthlyActivityResponse,
+  YearQuery,
   AdminPaperResponse,
   AdminStatsResponse,
   AdminUserDetailResponse,
@@ -62,6 +64,18 @@ export class AdminController {
   @ApiOkResponse({ type: AdminStatsResponse })
   stats(): Promise<AdminStatsResponse> {
     return this.admin.stats();
+  }
+
+  @Get('stats/activity')
+  @ApiOperation({
+    summary:
+      'Papers submitted and reviews sent per month of a year (the dashboard chart)',
+  })
+  @ApiOkResponse({ type: MonthlyActivityResponse })
+  monthlyActivity(@Query() query: YearQuery): Promise<MonthlyActivityResponse> {
+    return this.admin.monthlyActivity(
+      query.year ?? new Date().getUTCFullYear(),
+    );
   }
 
   @Get('users')

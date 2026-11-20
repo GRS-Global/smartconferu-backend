@@ -11,6 +11,8 @@ import type { ClientInfo } from '../../core/http/client-info.js';
 
 /** Two tabs refreshing at once both present the same token; the slower one is not an attack. */
 const CONCURRENT_REFRESH_GRACE_MS = 30_000;
+/** Without "Keep me signed in", a session ends after this long without a refresh. */
+export const SHORT_SESSION_IDLE_MS = 12 * 3_600_000;
 
 export interface IssuedRefreshToken {
   userId: string;
@@ -19,6 +21,8 @@ export interface IssuedRefreshToken {
   expiresAt: Date;
   /** The family passed a second factor at sign-in; carried across refreshes. */
   mfaVerified: boolean;
+  /** "Keep me signed in": the cookie outlives the browser. Carried across refreshes. */
+  persistent: boolean;
 }
 
 /** A signed-in device, as shown in "Where you're signed in". */
@@ -64,6 +68,7 @@ export class SessionsService {
     client: ClientInfo,
     executor: Executor = this.database.db,
     mfaVerified = false,
+    persistent = true,
   ): Promise<IssuedRefreshToken> {
     return this.insert(
       executor,
@@ -71,6 +76,7 @@ export class SessionsService {
       randomUUID(),
       client,
       mfaVerified ? new Date() : null,
+      persistent,
     );
   }
 
@@ -83,6 +89,20 @@ export class SessionsService {
       .update(sessions)
       .set({ mfaVerifiedAt: new Date() })
       .where(and(eq(sessions.familyId, familyId), isNull(sessions.revokedAt)));
+  }
+
+  /** "Confirm it's you" passed in this session family (high-risk admin actions, a few minutes). */
+  async markSteppedUp(familyId: string, userId: string): Promise<void> {
+    await this.database.db
+      .update(sessions)
+      .set({ stepUpAt: new Date() })
+      .where(
+        and(
+          eq(sessions.familyId, familyId),
+          eq(sessions.userId, userId),
+          isNull(sessions.revokedAt),
+        ),
+      );
   }
 
   /** The user's signed-in devices: one entry per family with a usable refresh token. */
@@ -176,6 +196,8 @@ export class SessionsService {
         current.familyId,
         client,
         current.mfaVerifiedAt,
+        current.persistent,
+        current.stepUpAt,
       );
       return { ok: true, token };
     });
@@ -229,9 +251,14 @@ export class SessionsService {
     familyId: string,
     client: ClientInfo,
     mfaVerifiedAt: Date | null = null,
+    persistent = true,
+    stepUpAt: Date | null = null,
   ): Promise<IssuedRefreshToken> {
     const refreshToken = randomToken();
-    const expiresAt = new Date(Date.now() + this.ttlMs);
+    const expiresAt = new Date(
+      Date.now() +
+        (persistent ? this.ttlMs : Math.min(this.ttlMs, SHORT_SESSION_IDLE_MS)),
+    );
     await executor.insert(sessions).values({
       userId,
       familyId,
@@ -240,6 +267,8 @@ export class SessionsService {
       mfaVerifiedAt,
       userAgent: client.userAgent,
       ipAddress: client.ipAddress,
+      persistent,
+      stepUpAt,
     });
     return {
       userId,
@@ -247,6 +276,7 @@ export class SessionsService {
       refreshToken,
       expiresAt,
       mfaVerified: mfaVerifiedAt !== null,
+      persistent,
     };
   }
 }
