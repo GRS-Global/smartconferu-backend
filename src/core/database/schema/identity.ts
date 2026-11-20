@@ -90,11 +90,44 @@ export const sessions = pgTable(
     mfaVerifiedAt: timestamptz('mfa_verified_at'),
     userAgent: text('user_agent'),
     ipAddress: text('ip_address'),
+    /**
+     * "Keep me signed in": a persistent cookie for the full refresh lifetime. Off, the cookie ends
+     * with the browser and the session after a short idle time.
+     */
+    persistent: boolean().notNull().default(true),
+    /** Last "Confirm it's you" code in this session family (high-risk admin actions). */
+    stepUpAt: timestamptz('step_up_at'),
   },
   (t) => [
     unique('sessions_token_hash_key').on(t.tokenHash),
     index('sessions_user_idx').on(t.userId),
     index('sessions_family_idx').on(t.familyId),
+  ],
+);
+
+/**
+ * "Trust this device" on the admin console: a browser whose super admin passed the emailed code
+ * skips it at the next password sign-ins until it expires. Only a hash of the cookie is stored.
+ * Revoked by "Forget this device", signing out everywhere and a password change or reset.
+ */
+export const trustedDevices = pgTable(
+  'trusted_devices',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    createdAt: createdAt(),
+    expiresAt: timestamptz('expires_at').notNull(),
+    lastUsedAt: timestamptz('last_used_at'),
+    revokedAt: timestamptz('revoked_at'),
+    userAgent: text('user_agent'),
+    ipAddress: text('ip_address'),
+  },
+  (t) => [
+    unique('trusted_devices_token_hash_key').on(t.tokenHash),
+    index('trusted_devices_user_idx').on(t.userId),
   ],
 );
 

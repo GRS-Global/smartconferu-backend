@@ -1,12 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import { and, count, eq, inArray, ne } from 'drizzle-orm';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
+import {
+  adminNotes,
+  conferences,
+  submissions,
+} from '../../core/database/schema/index.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import { displayName, toConference } from './conference.mapper.js';
 import { ConferencesRepository } from './conferences.repository.js';
+import { licenseExpiryOf } from './license.service.js';
 import { ConferenceEmailsService } from './conference-emails.service.js';
 import type { CfpStatus } from './dto/cfp.dto.js';
 import type {
@@ -14,6 +21,20 @@ import type {
   ConferenceStatus,
   DeletionRequestResponse,
 } from './dto/conference.dto.js';
+
+/** The license end and whether the conference is still on its first 30 days. */
+const licenseOf = (row: {
+  details: unknown;
+  createdAt: Date;
+  suspendedAt: Date | null;
+}) => {
+  const { expiry, onTrial } = licenseExpiryOf(row);
+  return {
+    licenseExpiry: expiry,
+    onTrial,
+    suspended: row.suspendedAt !== null,
+  };
+};
 
 /**
  * The super admin's side of the conference lifecycle: approving requests, deciding deletion
@@ -29,10 +50,31 @@ export class ConferenceAdminService {
     private readonly audit: AuditService,
   ) {}
 
+  /** Submitted papers (withdrawn ones included, drafts not) per conference. */
+  private async paperCounts(ids: string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const rows = await this.database.db
+      .select({ conferenceId: submissions.conferenceId, n: count() })
+      .from(submissions)
+      .where(
+        and(
+          inArray(submissions.conferenceId, ids),
+          ne(submissions.status, 'draft'),
+        ),
+      )
+      .groupBy(submissions.conferenceId);
+    return new Map(rows.map((r) => [r.conferenceId, Number(r.n)]));
+  }
+
   async list(status?: ConferenceStatus): Promise<AdminConferenceResponse[]> {
     const rows = await this.conferences.listAll(this.database.db, status);
+    const papers = await this.paperCounts(rows.map((r) => r.id));
     return rows.map((row) => ({
       ...toConference(row, { myRoles: [], isChair: true }),
+      papers: papers.get(row.id) ?? 0,
+      ...licenseOf(row),
       requester: {
         id: row.createdBy,
         name: displayName(
@@ -46,6 +88,124 @@ export class ConferenceAdminService {
     }));
   }
 
+  /**
+   * Suspend: the conference becomes read-only for its chairs, team, authors and reviewers
+   * (SuspensionGuard) until reactivated. Its chairs are told. Reactivate undoes it.
+   */
+  async setSuspended(
+    admin: AuthUser,
+    conferenceId: string,
+    suspend: boolean,
+    reason: string | null | undefined,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          acronym: conferences.acronym,
+          status: conferences.status,
+          suspendedAt: conferences.suspendedAt,
+        })
+        .from(conferences)
+        .where(eq(conferences.id, conferenceId))
+        .for('update');
+      if (!row) {
+        throw AppException.notFound('The conference');
+      }
+      if (row.status !== 'active' && row.status !== 'archived') {
+        throw AppException.businessRule(
+          'Only a live or archived conference can be suspended.',
+        );
+      }
+      if ((row.suspendedAt !== null) === suspend) {
+        return;
+      }
+      await tx
+        .update(conferences)
+        .set({
+          suspendedAt: suspend ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(conferences.id, conferenceId));
+      await this.notifications.notifyChairs(tx, conferenceId, {
+        kind: 'conference_suspension',
+        title: suspend
+          ? `${row.acronym} is suspended`
+          : `${row.acronym} is active again`,
+        body: suspend
+          ? (reason ??
+            'Nothing can be changed in it for now. Contact Smartconferu support.')
+          : 'Smartconferu lifted the suspension.',
+      });
+      await this.audit.record(
+        {
+          action: suspend ? 'conference.suspended' : 'conference.reactivated',
+          actorId: admin.id,
+          entityType: 'conference',
+          entityId: conferenceId,
+          client,
+          data: { acronym: row.acronym, ...(reason ? { reason } : {}) },
+        },
+        tx,
+      );
+    });
+  }
+
+  /** "Ask for info" on a conference request: the chair who asked gets the message (notification and
+   *  email), and it joins the request's thread in the console. The request stays waiting. */
+  async askForInfo(
+    admin: AuthUser,
+    conferenceId: string,
+    message: string,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const facts = await this.emails.facts(tx, conferenceId);
+      const [row] = await tx
+        .select({
+          status: conferences.status,
+          createdBy: conferences.createdBy,
+        })
+        .from(conferences)
+        .where(eq(conferences.id, conferenceId));
+      if (!row || row.status !== 'pending_approval') {
+        throw AppException.businessRule(
+          'This request is no longer waiting for a decision.',
+        );
+      }
+      await tx.insert(adminNotes).values({
+        queue: 'requests',
+        itemId: conferenceId,
+        kind: 'message',
+        authorId: admin.id,
+        text: message,
+      });
+      await this.notifications.notify(tx, [row.createdBy], {
+        kind: 'conference_info_requested',
+        title: `More information needed: ${facts.acronym}`,
+        body: message,
+        conferenceId,
+      });
+      await this.emails.infoRequested(
+        tx,
+        { ...facts, createdBy: row.createdBy },
+        message,
+        admin.id,
+      );
+      await this.audit.record(
+        {
+          action: 'conference.info_requested',
+          actorId: admin.id,
+          entityType: 'conference',
+          entityId: conferenceId,
+          client,
+          data: { acronym: facts.acronym },
+        },
+        tx,
+      );
+    });
+  }
+
   /** The Calls for Papers waiting for approval (or in another state), newest conference first. */
   async listCfps(cfpState: CfpStatus): Promise<AdminConferenceResponse[]> {
     const rows = await this.conferences.listAll(
@@ -53,8 +213,11 @@ export class ConferenceAdminService {
       undefined,
       cfpState,
     );
+    const papers = await this.paperCounts(rows.map((r) => r.id));
     return rows.map((row) => ({
       ...toConference(row, { myRoles: [], isChair: true }),
+      papers: papers.get(row.id) ?? 0,
+      ...licenseOf(row),
       requester: {
         id: row.createdBy,
         name: displayName(

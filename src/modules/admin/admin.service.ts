@@ -4,15 +4,19 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import {
   and,
+  ne,
+  count,
   asc,
   desc,
   eq,
+  gte,
   ilike,
   inArray,
   isNull,
   lt,
   or,
   sql,
+  type AnyColumn,
 } from 'drizzle-orm';
 import { DatabaseService } from '../../core/database/database.service.js';
 import {
@@ -36,6 +40,7 @@ import { decodeCursor, keyset, page } from '../../core/http/pagination.js';
 import { paperId, STAGE_OUTCOMES } from '../submissions/submission.mapper.js';
 import type {
   ActivityPage,
+  MonthlyActivityResponse,
   AdminPaperResponse,
   AdminStatsResponse,
   AdminUserDetailResponse,
@@ -100,6 +105,21 @@ export function paperStage(
   return 'in_review';
 }
 
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
 /**
  * The super-admin console: platform numbers, every user, recent activity, and each conference's
  * review health. Replaces the console's direct reads of every table (src/data/platform.js).
@@ -110,6 +130,57 @@ export class AdminService {
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
   ) {}
+
+  /** "Platform activity": papers submitted and reviews sent per month of `year` (UTC), all conferences. */
+  async monthlyActivity(year: number): Promise<MonthlyActivityResponse> {
+    const db = this.database.db;
+    const from = new Date(Date.UTC(year, 0, 1));
+    const to = new Date(Date.UTC(year + 1, 0, 1));
+    const month = (col: AnyColumn) =>
+      sql<number>`extract(month from ${col} at time zone 'UTC')::int`;
+    const papers = await db
+      .select({ m: month(submissions.submittedAt), n: count() })
+      .from(submissions)
+      .where(
+        and(
+          ne(submissions.status, 'draft'),
+          gte(submissions.submittedAt, from),
+          lt(submissions.submittedAt, to),
+        ),
+      )
+      .groupBy(sql`1`);
+    const sent = await db
+      .select({ m: month(reviews.submittedAt), n: count() })
+      .from(reviews)
+      .where(
+        and(
+          eq(reviews.status, 'submitted'),
+          gte(reviews.submittedAt, from),
+          lt(reviews.submittedAt, to),
+        ),
+      )
+      .groupBy(sql`1`);
+    const [first] = await db
+      .select({
+        y: sql<
+          number | null
+        >`extract(year from min(${submissions.submittedAt}))::int`,
+      })
+      .from(submissions);
+    const now = new Date().getUTCFullYear();
+    const start = Math.min(first?.y ?? now, now);
+    const at = (rows: { m: number; n: number }[], m: number) =>
+      Number(rows.find((r) => Number(r.m) === m)?.n ?? 0);
+    return {
+      year,
+      years: Array.from({ length: now - start + 1 }, (_, i) => now - i),
+      months: MONTHS.map((label, i) => ({
+        month: label,
+        submissions: at(papers, i + 1),
+        reviews: at(sent, i + 1),
+      })),
+    };
+  }
 
   async stats(): Promise<AdminStatsResponse> {
     const db = this.database.db;
@@ -511,6 +582,21 @@ export class AdminService {
             ? sql`${auditLog.action} like ${`${query.action}%`}`
             : undefined,
           query.actorId ? eq(auditLog.actorId, query.actorId) : undefined,
+          query.entityId ? eq(auditLog.entityId, query.entityId) : undefined,
+          query.from
+            ? gte(auditLog.occurredAt, new Date(`${query.from}T00:00:00Z`))
+            : undefined,
+          query.to
+            ? lt(
+                auditLog.occurredAt,
+                new Date(
+                  new Date(`${query.to}T00:00:00Z`).getTime() + 86_400_000,
+                ),
+              )
+            : undefined,
+          query.q?.trim()
+            ? sql`(${auditLog.action} || ' ' || ${auditLog.data}::text || ' ' || coalesce(${users.email}, '') || ' ' || coalesce(${profiles.firstName}, '') || ' ' || coalesce(${profiles.lastName}, '')) ilike ${`%${query.q.trim().replace(/[%_\\]/g, '\\$&')}%`}`
+            : undefined,
         ),
       )
       .orderBy(desc(auditLog.id))

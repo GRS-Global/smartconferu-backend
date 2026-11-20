@@ -13,10 +13,17 @@ import { OAuthService } from './oauth/oauth.service.js';
 import { OAuthProviders } from './oauth/providers.js';
 import { OneTimeTokensService } from './one-time-tokens.service.js';
 import { SessionsService } from './sessions.service.js';
+import { StepUpController } from './step-up.controller.js';
+import { TrustedDevicesService } from './trusted-devices.service.js';
 
 @Module({
   imports: [UsersModule],
-  controllers: [AuthController, OAuthController, AccountController],
+  controllers: [
+    AuthController,
+    OAuthController,
+    AccountController,
+    StepUpController,
+  ],
   providers: [
     AuthService,
     AccountService,
@@ -24,6 +31,7 @@ import { SessionsService } from './sessions.service.js';
     AuthRepository,
     AuthCookies,
     SessionsService,
+    TrustedDevicesService,
     OneTimeTokensService,
     MfaService,
     OAuthProviders,

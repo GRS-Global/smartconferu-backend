@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsEmail,
   IsOptional,
   IsString,
@@ -34,6 +35,17 @@ export class SignInDto extends EmailDto {
   @MinLength(1)
   @MaxLength(PASSWORD_MAX_LENGTH)
   password: string;
+}
+
+export class PasswordSignInDto extends SignInDto {
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      '"Keep me signed in on this device". false: the session cookie ends when the browser closes, and the session after 12 hours without use.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  remember?: boolean;
 }
 
 export class RegisterDto extends SignInDto {
@@ -186,6 +198,22 @@ export class MfaRequiredResponse {
 
   @ApiProperty()
   message: string;
+
+  @ApiPropertyOptional({
+    example: '123456',
+    description:
+      'Development only (DEV_SHOW_EMAIL_CODES): the emailed code, so the console can fill it in. Never sent in production.',
+  })
+  devCode?: string;
+}
+
+export class DevCodeResponse {
+  @ApiPropertyOptional({
+    example: '123456',
+    description:
+      'Development only (DEV_SHOW_EMAIL_CODES): the new code. Absent otherwise.',
+  })
+  devCode?: string;
 }
 
 export class MfaCodeDto {
@@ -200,6 +228,15 @@ export class MfaCodeDto {
     message: 'Enter the 6-digit code from your app, or a recovery code.',
   })
   code: string;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      '"Trust this device" (the emailed admin code only): this browser skips the code at password sign-ins for 14 days.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  trustDevice?: boolean;
 }
 
 export class DeleteAccountDto {

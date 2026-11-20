@@ -52,6 +52,26 @@ export class AccessTokenService {
       .sign(this.privateKey);
   }
 
+  /**
+   * "View as": a read-only access token for `userId`, for `minutes`, on behalf of a Super Admin.
+   * No session or refresh token goes with it; when it expires, the view ends.
+   */
+  issueSupportView(
+    userId: string,
+    adminId: string,
+    minutes: number,
+  ): Promise<string> {
+    return new SignJWT({ sid: randomUUID(), sv: adminId })
+      .setProtectedHeader({ alg: 'EdDSA', kid: this.keyId, typ: 'JWT' })
+      .setSubject(userId)
+      .setIssuer(TOKEN_ISSUER)
+      .setAudience(TOKEN_AUDIENCE)
+      .setIssuedAt()
+      .setExpirationTime(`${minutes * 60}s`)
+      .setJti(randomUUID())
+      .sign(this.privateKey);
+  }
+
   /** Resolves to the user, or rejects if the token is invalid or expired. */
   async verify(token: string): Promise<AuthUser> {
     const { payload } = await jwtVerify(token, this.publicKey, {
@@ -66,6 +86,7 @@ export class AccessTokenService {
       id: payload.sub,
       sessionId: payload.sid,
       mfa: payload.mfa === true,
+      ...(typeof payload.sv === 'string' ? { supportViewBy: payload.sv } : {}),
     };
   }
 
@@ -77,8 +98,9 @@ export class AccessTokenService {
     userId: string,
     method: string,
     factor: MfaFactor = 'totp',
+    remember = true,
   ): Promise<string> {
-    return new SignJWT({ method, factor })
+    return new SignJWT({ method, factor, remember })
       .setProtectedHeader({ alg: 'EdDSA', kid: this.keyId, typ: 'JWT' })
       .setSubject(userId)
       .setIssuer(TOKEN_ISSUER)
@@ -89,9 +111,12 @@ export class AccessTokenService {
       .sign(this.privateKey);
   }
 
-  async verifyMfaChallenge(
-    token: string,
-  ): Promise<{ userId: string; method: string; factor: MfaFactor }> {
+  async verifyMfaChallenge(token: string): Promise<{
+    userId: string;
+    method: string;
+    factor: MfaFactor;
+    remember: boolean;
+  }> {
     const { payload } = await jwtVerify(token, this.publicKey, {
       issuer: TOKEN_ISSUER,
       audience: MFA_CHALLENGE_AUDIENCE,
@@ -104,6 +129,7 @@ export class AccessTokenService {
       userId: payload.sub,
       method: typeof payload.method === 'string' ? payload.method : 'unknown',
       factor: payload.factor === 'email' ? 'email' : 'totp',
+      remember: payload.remember !== false,
     };
   }
 

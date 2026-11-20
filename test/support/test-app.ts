@@ -36,6 +36,11 @@ export interface TestApp {
   ): Promise<import('../../src/modules/jobs/jobs.runner.js').JobsResult>;
   /** A valid access token for `userId`, as the API would issue it at sign-in. */
   tokenFor(userId: string, mfa?: boolean): Promise<string>;
+  /**
+   * A verified session that just passed "Confirm it's you" (high-risk admin actions): a real
+   * session row with a fresh step-up, and its access token.
+   */
+  steppedUpToken(userId: string): Promise<string>;
   /** Creates an account through the app's own repository (verified unless told otherwise). */
   createUser(fields?: {
     email?: string;
@@ -91,6 +96,8 @@ export async function createTestApp(
       .toString(),
     TOKEN_HASH_SECRET: randomBytes(32).toString('hex'),
     EMAIL_TRANSPORT: 'log',
+    // A developer's .env may turn this on; tests opt in (dev-codes.e2e-spec.ts).
+    DEV_SHOW_EMAIL_CODES: 'false',
     // Tests send the queue themselves (sendQueuedEmails), so nothing is sent behind their back.
     EMAIL_QUEUE_ENABLED: 'false',
     // Tests run the jobs themselves (runJobs).
@@ -151,6 +158,15 @@ export async function createTestApp(
     oidc,
     tokenFor: (userId, mfa = false) =>
       app.get(AccessTokenService).issue(userId, randomUUID(), mfa),
+    async steppedUpToken(userId) {
+      const familyId = randomUUID();
+      await db.query(
+        `insert into sessions (user_id, family_id, token_hash, expires_at, mfa_verified_at, step_up_at)
+         values ($1, $2, $3, now() + interval '1 day', now(), now())`,
+        [userId, familyId, randomUUID()],
+      );
+      return app.get(AccessTokenService).issue(userId, familyId, true);
+    },
     async createUser({
       email = `${randomUUID()}@example.test`,
       password = 'correct horse battery',
@@ -169,7 +185,7 @@ export async function createTestApp(
     },
     async reset() {
       await db.exec(
-        'delete from email_log; delete from conferences; delete from users; delete from audit_log; delete from auth_tokens;',
+        'delete from email_log; delete from admin_notes; delete from admin_claims; delete from conferences; delete from users; delete from audit_log; delete from auth_tokens;',
       );
       transport.outbox.length = 0;
     },

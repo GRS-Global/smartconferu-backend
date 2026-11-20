@@ -617,12 +617,12 @@ describe('Peer review and decisions', () => {
       );
       await t.sendQueuedEmails();
       const mails = t.outbox().filter((m) => m.to === s.reviewer.email);
-      expect(mails.some((m) => /Reminder: your review of/.test(m.subject))).toBe(
-        true,
-      );
-      expect(mails.some((m) => /Message about .* from the chair/.test(m.subject))).toBe(
-        true,
-      );
+      expect(
+        mails.some((m) => /Reminder: your review of/.test(m.subject)),
+      ).toBe(true);
+      expect(
+        mails.some((m) => /Message about .* from the chair/.test(m.subject)),
+      ).toBe(true);
       const logged = await t.db.query<{ template_key: string }>(
         `select template_key from email_log where lower(to_email) = lower($1)
           and template_key in ('reviewReminderFromChair', 'reviewerMessage')`,

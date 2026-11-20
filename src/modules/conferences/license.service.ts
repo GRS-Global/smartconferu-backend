@@ -27,6 +27,23 @@ const TRIAL_DAYS = 30;
 
 type RequestRow = typeof licenseRequests.$inferSelect;
 
+/** The conference's license end: what a Super Admin set, else 30 days from its creation (the trial). */
+export function licenseExpiryOf(conference: {
+  details: unknown;
+  createdAt: Date;
+}): {
+  expiry: string;
+  onTrial: boolean;
+} {
+  const set = (conference.details as Record<string, unknown>).licenseExpiry;
+  return typeof set === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(set)
+    ? { expiry: set, onTrial: false }
+    : {
+        expiry: addDays(day(conference.createdAt), TRIAL_DAYS),
+        onTrial: true,
+      };
+}
+
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (isoDay: string, days: number) => {
   const d = new Date(`${isoDay}T00:00:00Z`);
@@ -66,12 +83,8 @@ export class LicenseService {
     return access;
   }
 
-  /** The conference's license end: what a Super Admin set, else 30 days from its creation. */
   private expiryOf(conference: { details: unknown; createdAt: Date }): string {
-    const set = (conference.details as Record<string, unknown>).licenseExpiry;
-    return typeof set === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(set)
-      ? set
-      : addDays(day(conference.createdAt), TRIAL_DAYS);
+    return licenseExpiryOf(conference).expiry;
   }
 
   private async conference(executor: Executor, conferenceId: string) {
@@ -208,6 +221,56 @@ export class LicenseService {
   }
 
   // Super admins ---------------------------------------------------------------------------------
+
+  /** "Extend license" on a conference's page: the license runs until `expiry`; its chairs are told. */
+  async setExpiry(
+    admin: AuthUser,
+    conferenceId: string,
+    expiry: string,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const conference = await this.conference(tx, conferenceId);
+      if (conference.status === 'deleted' || conference.status === 'rejected') {
+        throw AppException.businessRule(
+          'This conference was declined or deleted.',
+        );
+      }
+      const current = this.expiryOf(conference);
+      if (expiry <= day(new Date()) || expiry <= current) {
+        throw AppException.businessRule(
+          `Pick a date after ${current > day(new Date()) ? current : day(new Date())}.`,
+        );
+      }
+      await tx
+        .update(conferences)
+        .set({
+          details: sql`${conferences.details} || ${JSON.stringify({ licenseExpiry: expiry })}::jsonb`,
+          updatedAt: new Date(),
+        })
+        .where(eq(conferences.id, conferenceId));
+      await this.notifications.notifyChairs(tx, conferenceId, {
+        kind: 'license_decision',
+        title: `License extended to ${expiry}`,
+        body: `Smartconferu extended the license of ${conference.acronym}.`,
+      });
+      await this.audit.record(
+        {
+          action: 'conference.license_extended',
+          actorId: admin.id,
+          entityType: 'conference',
+          entityId: conferenceId,
+          client,
+          data: {
+            acronym: conference.acronym,
+            previous: current,
+            newExpiry: expiry,
+          },
+        },
+        tx,
+      );
+    });
+  }
 
   async list(status: LicenseStatus): Promise<AdminLicenseRequestResponse[]> {
     const rows = await this.database.db

@@ -9,3 +9,4 @@ export * from './communications.js';
 export * from './ai.js';
 export * from './audit.js';
 export * from './master-data.js';
+export * from './admin.js';

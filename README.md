@@ -185,7 +185,20 @@ How it works:
   `POST /auth/mfa/email-code` sends a new one); `POST /auth/mfa/verify` with it opens a verified
   session. With an authenticator app, `factor` is `totp` as for everyone. Signing in by code,
   link or Google/Microsoft/ORCID gives an ordinary session: fine for the app, 403
-  `AUTH_MFA_REQUIRED` on `/admin/…`.
+  `AUTH_MFA_REQUIRED` on `/admin/…`. In development, `DEV_SHOW_EMAIL_CODES=true` also puts the
+  code in the response (`devCode`, on sign-in and on `mfa/email-code`) so the console fills it in;
+  the API refuses to start with it in production.
+- **Keep me signed in:** `POST /auth/sign-in` takes `remember` (default `true`). With `false`
+  the refresh cookie has no expiry (it ends when the browser closes) and the session ends after
+  12 hours without use; this carries through the code step and every refresh
+  (`sessions.persistent`).
+- **Trust this device (admin console):** `POST /auth/mfa/verify` with `trustDevice: true` after
+  the *emailed* admin code sets an httpOnly `sc_trusted` cookie for 14 days (only its hash is kept,
+  in `trusted_devices`, tied to that admin). A password sign-in from that browser then skips the
+  emailed code and is a verified session (audit: `secondFactor: "trusted_device"`). It never
+  replaces the password, vouches only for the admin who trusted it, and does not apply to
+  authenticator-app users. `POST /auth/trusted-device/forget` ends it; signing out everywhere and
+  changing or resetting the password end every trust of the account.
 - **Google, Microsoft, ORCID:** the app links to `/auth/oauth/<provider>/start?terms=<version>`;
   the API redirects back to `<APP_URL>/auth/callback?status=signed_in|mfa_required|linked` (or
   `error=…`) with the refresh cookie set. A provider account joins an existing account only when
@@ -342,13 +355,33 @@ Every `/admin/…` route needs a super admin in a two-step-verified session (`@S
 
 | Area                  | Endpoints                                                                                                        |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Dashboard             | `GET /admin/stats`, `GET /admin/activity` (`?action=`, `?actorId=`, `?before=`)                                  |
-| Conferences, requests | `GET /admin/conferences`, `POST /admin/conferences/:id/decision`, `…/undelete`, `…/papers`                       |
+| Dashboard             | `GET /admin/stats`, `GET /admin/stats/activity?year=` (monthly chart), `GET /admin/activity` (`?action=`, `?actorId=`, `?entityId=`, `?from=`, `?to=`, `?q=`, `?before=`) |
+| Conferences, requests | `GET /admin/conferences` (+ `papers`, `licenseExpiry`, `onTrial`, `suspended`), `POST /admin/conferences/:id/decision`, `…/ask-info`, `…/license` ⚑, `…/suspend` ⚑, `…/reactivate` ⚑, `…/undelete`, `…/papers` |
 | Deletion requests     | `GET /admin/deletion-requests`, `POST /admin/deletion-requests/:id/decision`                                     |
-| Users                 | `GET /admin/users`, `GET /admin/users/:id` (conferences, recent activity), `POST …/suspend`, `POST …/reactivate` |
+| Queue work            | `GET /admin/queues/:queue` (claims + notes), `PUT/DELETE …/:itemId/claim`, `POST …/:itemId/notes`; queues `requests`, `deletions`, `licenses`, `cfps` |
+| Users                 | `GET /admin/users`, `GET /admin/users/:id` (conferences, recent activity), `POST …/suspend`, `POST …/reactivate`, `GET …/sessions`, `DELETE …/sessions/:sessionId`, `POST …/reset-mfa` ⚑, `POST …/merge` ⚑, `POST …/view-as` ⚑ |
 | Master data           | `/admin/master-data/societies`, `…/institutions` (+ `/:id/merge`), `…/research-areas`                            |
 | Email templates       | `/admin/email-templates` (see below)                                                                             |
 
+- **⚑ Step-up ("Confirm it's you"):** these need a fresh second-factor code in this session within
+  the last 10 minutes (`@StepUp()`); otherwise 403 `AUTH_STEP_UP_REQUIRED`. `POST /auth/step-up/code`
+  emails a code (or answers `factor: "totp"`), `POST /auth/step-up` with it marks the session
+  (`sessions.step_up_at`).
+- **Claims and notes** (`admin_claims`, `admin_notes`): "Assign to me" / "Take over" / "Release",
+  internal notes only admins see, and "Ask for info" messages (sent to the chair by notification
+  and email, kept as `kind: "message"`).
+- **Suspend a conference** sets `conferences.suspended_at`: `SuspensionGuard` (global) refuses every
+  non-GET request about it (found from `:conferenceId`, `:submissionId`, `:assignmentId` or
+  `:reviewId`) except from a verified super admin; chairs are notified. Reactivate clears it.
+- **Licenses:** a conference's license ends on `details.licenseExpiry`, else 30 days after it was
+  created (`onTrial`). `POST …/license` moves it directly and tells the chairs.
+- **View as:** a read-only 30-minute access token as the user (claim `sv` = the admin), audited with
+  the reason. `SupportViewGuard` (global) refuses anything but reads with it, and every `/admin`
+  and `/auth` route. The user app keeps it in the tab's sessionStorage and never refreshes it.
+- **Merge accounts** moves the other account's papers, reviews, roles, requests, notifications and
+  sign-in providers to the kept one (refused when both review the same paper), then closes the
+  other (disabled, no email; its address is kept in `profile_details.data.mergedEmails`).
+- **Reset 2-step** removes the authenticator app and recovery codes and every trusted device.
 - **Suspend** sets the account to `disabled` and ends every session (an access token already
   issued lasts its 15 minutes at most); signing in is refused until **reactivate**. Not your own
   account, not another super admin's. Both are recorded with the optional reason.
@@ -525,7 +558,8 @@ npm run build
 ### Good to know
 
 - **Demo account:** `dev@example.test` / `smartconferu-dev` (a super admin).
-- **Emails** (links, codes) are printed in the `start:dev` terminal while `EMAIL_TRANSPORT=log`.
+- **Emails** (links, codes) are printed in the `start:dev` terminal while `EMAIL_TRANSPORT=log`. With
+  `DEV_SHOW_EMAIL_CODES=true` the admin console fills in its sign-in code by itself.
 - **Local data** lives in `.pglite-dev/`. `npm run db:serve -- --fresh` starts over.
 - **Changed `.env`?** Restart `npm run start:dev`.
 - **pgAdmin / psql** (while `db:serve` runs): host `127.0.0.1`, port `54329`, user `postgres`, no

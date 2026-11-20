@@ -139,6 +139,56 @@ describe('The super-admin console', () => {
       action: 'submission.created',
       actor: { name: 'Ada Author' },
     });
+    // The Audit Log's filters: one conference, a date range, words.
+    const about = await as(admin.token)
+      .get(`/admin/activity?entityId=${conferenceId}`)
+      .expect(200);
+    expect(about.body.data.length).toBeGreaterThan(0);
+    expect(
+      about.body.data.every(
+        (a: { entityId: string }) => a.entityId === conferenceId,
+      ),
+    ).toBe(true);
+    const today = new Date().toISOString().slice(0, 10);
+    const inRange = await as(admin.token)
+      .get(`/admin/activity?from=${today}&to=${today}`)
+      .expect(200);
+    expect(inRange.body.data.length).toBeGreaterThan(0);
+    const before = await as(admin.token)
+      .get('/admin/activity?to=2000-01-01')
+      .expect(200);
+    expect(before.body.data).toEqual([]);
+    const words = await as(admin.token)
+      .get('/admin/activity?q=ada%20author')
+      .expect(200);
+    expect(words.body.data[0].actor.name).toBe('Ada Author');
+    const odd = await as(admin.token)
+      .get('/admin/activity?q=100%25_x')
+      .expect(200);
+    expect(odd.body.data).toEqual([]);
+    await as(admin.token).get('/admin/activity?from=yesterday').expect(400);
+
+    // The dashboard chart: this month has the paper submitted above.
+    const year = new Date().getUTCFullYear();
+    const chart = await as(admin.token)
+      .get(`/admin/stats/activity?year=${year}`)
+      .expect(200);
+    expect(chart.body.year).toBe(year);
+    expect(chart.body.years[0]).toBe(year);
+    expect(chart.body.months).toHaveLength(12);
+    const thisMonth = chart.body.months[new Date().getUTCMonth()];
+    expect(thisMonth.submissions).toBeGreaterThanOrEqual(1);
+    const empty = await as(admin.token)
+      .get('/admin/stats/activity?year=2001')
+      .expect(200);
+    expect(
+      empty.body.months.every(
+        (m: { submissions: number; reviews: number }) =>
+          m.submissions === 0 && m.reviews === 0,
+      ),
+    ).toBe(true);
+    await as(admin.token).get('/admin/stats/activity?year=1900').expect(400);
+
     const papers = await as(admin.token)
       .get(`/admin/conferences/${conferenceId}/papers`)
       .expect(200);

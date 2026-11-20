@@ -21,6 +21,7 @@ import type { RegisterDto } from './dto/auth.dto.js';
 import { MfaService } from './mfa.service.js';
 import { OneTimeTokensService } from './one-time-tokens.service.js';
 import { SessionsService } from './sessions.service.js';
+import { TrustedDevicesService } from './trusted-devices.service.js';
 
 const MAX_FAILED_SIGN_INS = 5;
 const LOCK_MINUTES = 15;
@@ -37,13 +38,31 @@ export interface SignInResult {
   expiresIn: number;
   refreshToken: string;
   refreshExpiresAt: Date;
+  /** "Keep me signed in": false makes the refresh cookie end with the browser. */
+  refreshPersistent: boolean;
   user: AccountSummary;
+  /** Set when this sign-in trusted the browser ("Trust this device"): the cookie to store. */
+  trustedDevice?: { token: string; expiresAt: Date };
+}
+
+/** How a sign-in should treat this browser. */
+export interface SignInOptions {
+  /** "Keep me signed in on this device" (default on). */
+  remember?: boolean;
+  /** The browser's "Trust this device" cookie, if any. */
+  trustedDeviceToken?: string;
 }
 
 /** A sign-in either starts a session, or waits for the second factor first. */
 export type SignInOutcome =
   | { kind: 'session'; session: SignInResult }
-  | { kind: 'mfa_required'; challenge: string; factor: MfaFactor };
+  | {
+      kind: 'mfa_required';
+      challenge: string;
+      factor: MfaFactor;
+      /** The emailed code, only with DEV_SHOW_EMAIL_CODES (development). */
+      devCode?: string;
+    };
 
 const fail = (status: HttpStatus, code: ErrorCode, message: string) =>
   new AppException(status, code, message);
@@ -74,6 +93,7 @@ const sessionExpired = () =>
 @Injectable()
 export class AuthService {
   private readonly appUrl: string;
+  private readonly showDevCodes: boolean;
 
   constructor(
     private readonly database: DatabaseService,
@@ -86,9 +106,11 @@ export class AuthService {
     private readonly email: EmailService,
     private readonly audit: AuditService,
     private readonly mfa: MfaService,
+    private readonly trustedDevices: TrustedDevicesService,
     config: ConfigService<Env, true>,
   ) {
     this.appUrl = config.get('APP_URL', { infer: true }).replace(/\/+$/, '');
+    this.showDevCodes = config.get('DEV_SHOW_EMAIL_CODES', { infer: true });
   }
 
   // Registration and email verification ------------------------------------------------------
@@ -202,6 +224,7 @@ export class AuthService {
     email: string,
     password: string,
     client: ClientInfo,
+    options: SignInOptions = {},
   ): Promise<SignInOutcome> {
     const user = await this.accounts.findByEmail(email);
     if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
@@ -254,7 +277,7 @@ export class AuthService {
           tx,
         );
       }
-      return this.completeSignIn(user, client, 'password', tx);
+      return this.completeSignIn(user, client, 'password', tx, options);
     });
   }
 
@@ -315,8 +338,10 @@ export class AuthService {
     client: ClientInfo,
     method: string,
     tx: Executor,
+    options: SignInOptions = {},
   ): Promise<SignInOutcome> {
     this.assertActive(user);
+    const remember = options.remember ?? true;
     if (await this.mfa.isEnabled(user.id, tx)) {
       await this.audit.record(
         {
@@ -330,14 +355,40 @@ export class AuthService {
       return {
         kind: 'mfa_required',
         factor: 'totp',
-        challenge: await this.accessTokens.issueMfaChallenge(user.id, method),
+        challenge: await this.accessTokens.issueMfaChallenge(
+          user.id,
+          method,
+          'totp',
+          remember,
+        ),
       };
     }
     // A super admin without an authenticator app proves the second step with a code emailed to
     // them (the admin console's sign-in). Other ways in (code, link, Google…) give an ordinary
     // session: fine for the app, not for admin features.
     if (user.isSuperAdmin && method === 'password' && user.email) {
-      await this.sendMfaEmailCode(user.id, user.email, tx);
+      // "Trust this device": this browser passed the emailed code lately, so the password is enough.
+      if (
+        await this.trustedDevices.isTrusted(
+          user.id,
+          options.trustedDeviceToken,
+          tx,
+        )
+      ) {
+        return {
+          kind: 'session',
+          session: await this.startSession(
+            user,
+            client,
+            'auth.sign_in',
+            { method, secondFactor: 'trusted_device' },
+            tx,
+            true,
+            remember,
+          ),
+        };
+      }
+      const code = await this.sendMfaEmailCode(user.id, user.email, tx);
       await this.audit.record(
         {
           action: 'auth.mfa_challenged',
@@ -354,7 +405,9 @@ export class AuthService {
           user.id,
           method,
           'email',
+          remember,
         ),
+        ...this.devCode(code),
       };
     }
     return {
@@ -365,15 +418,21 @@ export class AuthService {
         'auth.sign_in',
         { method },
         tx,
+        false,
+        remember,
       ),
     };
   }
 
-  /** Second step of a sign-in: a code from the authenticator app, or a recovery code. */
+  /**
+   * Second step of a sign-in: a code from the authenticator app, a recovery code, or the emailed
+   * admin code. `trustDevice` (emailed code only) lets this browser skip the code for a while.
+   */
   async completeMfaChallenge(
     challenge: string | undefined,
     code: string,
     client: ClientInfo,
+    trustDevice = false,
   ): Promise<SignInResult> {
     const pending = challenge
       ? await this.accessTokens.verifyMfaChallenge(challenge).catch(() => null)
@@ -394,20 +453,91 @@ export class AuthService {
       pending.factor === 'email'
         ? await this.verifyMfaEmailCode(user, code, client)
         : (await this.mfa.verify(user.id, code)).via;
-    return this.database.transaction((tx) =>
-      this.startSession(
+    return this.database.transaction(async (tx) => {
+      const trust =
+        trustDevice && pending.factor === 'email'
+          ? await this.trustedDevices.trust(user.id, client, tx)
+          : undefined;
+      const session = await this.startSession(
         user,
         client,
         'auth.sign_in',
-        { method: pending.method, secondFactor: via },
+        {
+          method: pending.method,
+          secondFactor: via,
+          ...(trust ? { trustedDevice: true } : {}),
+        },
         tx,
         true,
-      ),
-    );
+        pending.remember,
+      );
+      return trust ? { ...session, trustedDevice: trust } : session;
+    });
+  }
+
+  /**
+   * "Confirm it's you" before a high-risk admin action: an authenticator-app user types a code from
+   * the app; otherwise a code is emailed. The answer says which (and the code, in development).
+   */
+  async requestStepUpCode(
+    auth: AuthUser,
+  ): Promise<{ factor: MfaFactor; devCode?: string }> {
+    const user = await this.accounts.findById(auth.id);
+    if (!user) {
+      throw sessionExpired();
+    }
+    if (await this.mfa.isEnabled(user.id)) {
+      return { factor: 'totp' };
+    }
+    if (!user.email) {
+      throw AppException.businessRule('This account has no email address.');
+    }
+    const code = await this.sendMfaEmailCode(user.id, user.email);
+    return { factor: 'email', ...this.devCode(code) };
+  }
+
+  /** Checks the step-up code; this session may then do high-risk actions for a few minutes. */
+  async verifyStepUp(
+    auth: AuthUser,
+    code: string,
+    client: ClientInfo,
+  ): Promise<void> {
+    const user = await this.accounts.findById(auth.id);
+    if (!user) {
+      throw sessionExpired();
+    }
+    const via = (await this.mfa.isEnabled(user.id))
+      ? (await this.mfa.verify(user.id, code)).via
+      : await this.verifyMfaEmailCode(user, code, client);
+    await this.sessions.markSteppedUp(auth.sessionId, user.id);
+    await this.audit.record({
+      action: 'auth.step_up',
+      actorId: user.id,
+      entityType: 'session',
+      entityId: auth.sessionId,
+      client,
+      data: { via },
+    });
+  }
+
+  /** "Forget this device": the browser asks for the emailed code again next time. */
+  async forgetTrustedDevice(
+    token: string | undefined,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.trustedDevices.forget(token);
+    if (token) {
+      await this.audit.record({
+        action: 'auth.trusted_device_forgotten',
+        client,
+      });
+    }
   }
 
   /** Emails a new code for a pending email second step (the "Send a new code" link). */
-  async resendMfaEmailCode(challenge: string | undefined): Promise<void> {
+  async resendMfaEmailCode(
+    challenge: string | undefined,
+  ): Promise<{ devCode?: string }> {
     const pending = challenge
       ? await this.accessTokens.verifyMfaChallenge(challenge).catch(() => null)
       : null;
@@ -416,14 +546,19 @@ export class AuthService {
       throw sessionExpired();
     }
     this.assertActive(user);
-    await this.sendMfaEmailCode(user.id, user.email);
+    return this.devCode(await this.sendMfaEmailCode(user.id, user.email));
+  }
+
+  /** The code for the response, only when DEV_SHOW_EMAIL_CODES is on (development). */
+  private devCode(code: string): { devCode?: string } {
+    return this.showDevCodes ? { devCode: code } : {};
   }
 
   private async sendMfaEmailCode(
     userId: string,
     email: string,
     executor?: Executor,
-  ): Promise<void> {
+  ): Promise<string> {
     const code = await this.oneTimeTokens.issueCode(
       'mfa_email_code',
       email,
@@ -432,6 +567,7 @@ export class AuthService {
       executor,
     );
     await this.email.sendQuietly(emails.adminSignInCode(email, code));
+    return code;
   }
 
   private async verifyMfaEmailCode(
@@ -497,6 +633,7 @@ export class AuthService {
       expiresIn: this.accessTokens.ttlSeconds,
       refreshToken: result.token.refreshToken,
       refreshExpiresAt: result.token.expiresAt,
+      refreshPersistent: result.token.persistent,
       user: summarize(user),
     };
   }
@@ -523,6 +660,7 @@ export class AuthService {
 
   async signOutEverywhere(user: AuthUser, client: ClientInfo): Promise<void> {
     await this.sessions.revokeAllForUser(user.id, 'signed_out_everywhere');
+    await this.trustedDevices.forgetAllForUser(user.id);
     await this.audit.record({
       action: 'auth.sign_out_everywhere',
       actorId: user.id,
@@ -584,6 +722,7 @@ export class AuthService {
         undefined,
         tx,
       );
+      await this.trustedDevices.forgetAllForUser(found.id, tx);
       await this.audit.record(
         { action: 'auth.password_reset', actorId: found.id, client },
         tx,
@@ -634,6 +773,7 @@ export class AuthService {
         auth.sessionId,
         tx,
       );
+      await this.trustedDevices.forgetAllForUser(user.id, tx);
       await this.audit.record(
         { action: 'auth.password_changed', actorId: user.id, client },
         tx,
@@ -653,8 +793,15 @@ export class AuthService {
     data: Record<string, unknown>,
     tx: Executor,
     mfaVerified = false,
+    persistent = true,
   ): Promise<SignInResult> {
-    const session = await this.sessions.start(user.id, client, tx, mfaVerified);
+    const session = await this.sessions.start(
+      user.id,
+      client,
+      tx,
+      mfaVerified,
+      persistent,
+    );
     await this.accounts.update(
       user.id,
       { lastSignInAt: new Date(), failedSignInCount: 0, lockedUntil: null },
@@ -680,6 +827,7 @@ export class AuthService {
       expiresIn: this.accessTokens.ttlSeconds,
       refreshToken: session.refreshToken,
       refreshExpiresAt: session.expiresAt,
+      refreshPersistent: session.persistent,
       user: summarize({
         ...user,
         emailVerifiedAt: user.emailVerifiedAt ?? new Date(),

@@ -312,6 +312,7 @@ export class AccountController {
       res,
       session.refreshToken,
       session.refreshExpiresAt,
+      session.refreshPersistent,
     );
     return {
       accessToken: session.accessToken,
