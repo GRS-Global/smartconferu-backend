@@ -276,9 +276,7 @@ describe('License requests and Activity Logs', () => {
       expect(find(/Reminded a reviewer about ICX-1/)).toMatchObject({
         action: 'Sent',
       });
-      expect(
-        find(/Invited .*Viewer to the committee as/i),
-      ).toMatchObject({
+      expect(find(/Invited .*Viewer to the committee as/i)).toMatchObject({
         module: 'Committee',
         actorRole: 'chair',
       });
@@ -294,6 +292,102 @@ describe('License requests and Activity Logs', () => {
       await as(s.reviewer.token)
         .get(`/conferences/${s.id}/activity`)
         .expect(403);
+    });
+
+    it("gives a reviewer and an author their own log, and nobody else's", async () => {
+      const s = await setup();
+      const other = await person({ firstName: 'Olly', lastName: 'Other' });
+      const paper = await as(s.author.token)
+        .post(`/conferences/${s.id}/submissions`, {
+          title: 'Graph networks for protein folding',
+          abstract: 'We show that graph networks fold proteins.',
+          authors: [
+            { name: 'Ada Author', email: s.author.email, corresponding: true },
+          ],
+        })
+        .expect(201);
+      await t.db.query(
+        `update submissions set outcome = 'plagiarism_clear' where id = $1`,
+        [paper.body.id],
+      );
+      const members: Record<string, string> = {};
+      for (const who of [s.reviewer, other]) {
+        const m = await as(s.chair.token)
+          .post(`/conferences/${s.id}/members`, { email: who.email })
+          .expect(201);
+        await as(who.token)
+          .post(`/invitations/${m.body.member.id}/accept`)
+          .expect(200);
+        members[who.id] = m.body.member.id;
+      }
+      const given = await as(s.chair.token)
+        .post(`/submissions/${paper.body.id}/assignments`, {
+          memberIds: [members[s.reviewer.id]],
+          dueDate: '2099-04-30',
+        })
+        .expect(200);
+      const aid = given.body.assignments[0].id as string;
+      await as(s.chair.token)
+        .post(`/assignments/${aid}/remind`, {})
+        .expect(204);
+      await as(s.reviewer.token)
+        .post(`/assignments/${aid}/respond`, { accept: true })
+        .expect(200);
+      await as(s.reviewer.token)
+        .post(`/assignments/${aid}/extension-request`, { date: '2099-05-30' })
+        .expect(200);
+      await as(s.chair.token)
+        .post(`/submissions/${paper.body.id}/fix-request`, {
+          issue: 'Fonts are too small.',
+          fixBy: '2099-03-01',
+        })
+        .expect(200);
+
+      const mine = async (token: string, role: string) =>
+        (
+          await as(token)
+            .get(`/conferences/${s.id}/my-activity?role=${role}`)
+            .expect(200)
+        ).body as Array<{
+          description: string;
+          actorName: string;
+          actorRole: string;
+          module: string;
+          reviewerName: string | null;
+        }>;
+      const rev = await mine(s.reviewer.token, 'reviewer');
+      const text = rev.map((e) => e.description).join(' | ');
+      expect(text).toMatch(/You were assigned as a reviewer for ICX-1/);
+      expect(text).toMatch(/The chair sent you a reminder about ICX-1/);
+      expect(text).toMatch(/You accepted ICX-1/);
+      expect(text).toMatch(/You asked for more time on ICX-1/);
+      expect(rev.every((e) => e.module === 'Peer Review')).toBe(true);
+      expect(rev.every((e) => e.reviewerName === null)).toBe(true);
+      expect(
+        rev.find((e) => /sent you a reminder/.test(e.description)),
+      ).toMatchObject({ actorName: 'The chair', actorRole: 'chair' });
+      expect(rev.find((e) => /You accepted/.test(e.description))).toMatchObject(
+        {
+          actorRole: 'reviewer',
+        },
+      );
+      // another reviewer, who was not given the paper, sees none of it
+      expect(await mine(other.token, 'reviewer')).toEqual([]);
+
+      // the author: submissions only, with what the chair did to the paper
+      const auth = await mine(s.author.token, 'author');
+      const atext = auth.map((e) => e.description).join(' | ');
+      expect(atext).toMatch(/Submitted ICX-1/);
+      expect(atext).toMatch(/The chair asked you to fix something in ICX-1/);
+      expect(atext).not.toMatch(/review/i);
+      expect(auth.every((e) => e.module === 'Submissions')).toBe(true);
+      // the reviewer is no author of it
+      expect(await mine(s.reviewer.token, 'author')).toEqual([]);
+      // someone with no part in the conference is refused
+      const stranger = await person();
+      await as(stranger.token)
+        .get(`/conferences/${s.id}/my-activity`)
+        .expect(404);
     });
   });
 });

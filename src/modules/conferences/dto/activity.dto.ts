@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class ActivityQuery {
   @ApiPropertyOptional({ default: 500, maximum: 1000 })
@@ -10,6 +10,18 @@ export class ActivityQuery {
   @Min(1)
   @Max(1000)
   limit?: number;
+}
+
+export class MyActivityQuery extends ActivityQuery {
+  @ApiPropertyOptional({
+    enum: ['author', 'reviewer'],
+    default: 'author',
+    description:
+      'Whose log: the author log (Submissions) or the reviewer log (Peer Review).',
+  })
+  @IsOptional()
+  @IsIn(['author', 'reviewer'])
+  role?: 'author' | 'reviewer';
 }
 
 export class ActivityEntryResponse {

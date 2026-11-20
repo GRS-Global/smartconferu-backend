@@ -28,9 +28,14 @@ import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { Client, type ClientInfo } from '../../core/http/client-info.js';
 import { ConferenceRef } from '../../core/http/conference-ref.pipe.js';
 import { ActivityService } from './activity.service.js';
+import { MyActivityService } from './my-activity.service.js';
 import { CfpsService } from './cfps.service.js';
 import { ConferencesService } from './conferences.service.js';
-import { ActivityEntryResponse, ActivityQuery } from './dto/activity.dto.js';
+import {
+  ActivityEntryResponse,
+  ActivityQuery,
+  MyActivityQuery,
+} from './dto/activity.dto.js';
 import { CfpResponse, UpdateCfpDto } from './dto/cfp.dto.js';
 import {
   ConferenceResponse,
@@ -68,6 +73,7 @@ export class ConferencesController {
     private readonly cfps: CfpsService,
     private readonly members: MembersService,
     private readonly activity: ActivityService,
+    private readonly myActivity: MyActivityService,
   ) {}
 
   // Conferences ------------------------------------------------------------------------------
@@ -183,6 +189,25 @@ export class ConferencesController {
     @Query() query: ActivityQuery,
   ): Promise<ActivityEntryResponse[]> {
     return this.activity.list(user, conferenceId, query.limit ?? 500);
+  }
+
+  @Get(':conferenceId/my-activity')
+  @ApiOperation({
+    summary:
+      "My own Activity Log in this conference: an author's (what happened to their papers) or a reviewer's (their reviews, and what the chair did about them)",
+  })
+  @ApiOkResponse({ type: [ActivityEntryResponse] })
+  myActivityLog(
+    @CurrentUser() user: AuthUser,
+    @ConferenceId() conferenceId: string,
+    @Query() query: MyActivityQuery,
+  ): Promise<ActivityEntryResponse[]> {
+    return this.myActivity.list(
+      user,
+      conferenceId,
+      query.role ?? 'author',
+      query.limit ?? 500,
+    );
   }
 
   @Post(':conferenceId/deletion-request')

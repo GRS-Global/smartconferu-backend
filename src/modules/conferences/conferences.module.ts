@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ActivityService } from './activity.service.js';
+import { MyActivityService } from './my-activity.service.js';
 import { CfpsService } from './cfps.service.js';
 import { ConferenceAdminController } from './conference-admin.controller.js';
 import { ConferenceAdminService } from './conference-admin.service.js';
@@ -32,6 +33,7 @@ import { PublicConferencesController } from './public-conferences.controller.js'
     ConferencesService,
     CfpsService,
     ActivityService,
+    MyActivityService,
     LicenseService,
     MembersService,
     ConferenceAdminService,
