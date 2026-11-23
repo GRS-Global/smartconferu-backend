@@ -6,6 +6,7 @@ import { AppException } from '../../core/errors/app.exception.js';
 import type { DashboardResponse } from './dto/dashboard.response.js';
 import type { MeResponse, MyConferenceResponse } from './dto/me.response.js';
 import type { UpdateMeDto } from './dto/update-me.dto.js';
+import { guardProfileEmails } from './profile-emails.js';
 import { type ProfileUpdate, UsersRepository } from './users.repository.js';
 
 /** The signed-in user's own account. Every method only ever touches the caller's own rows. */
@@ -41,11 +42,17 @@ export class UsersService {
       ) {
         throw AppException.notFound('Your profile');
       }
-      if (
-        details !== undefined &&
-        !(await this.users.updateDetails(tx, user.id, details))
-      ) {
-        throw AppException.notFound('Your profile');
+      if (details !== undefined) {
+        // The extra email addresses are only "verified" when the server says so.
+        const account = await this.users.findProfile(tx, user.id);
+        const stored = await this.users.findDetails(tx, user.id);
+        const guarded = guardProfileEmails(details, stored, {
+          email: account?.email ?? null,
+          verified: account?.emailVerifiedAt != null,
+        });
+        if (!(await this.users.updateDetails(tx, user.id, guarded.details))) {
+          throw AppException.notFound('Your profile');
+        }
       }
       return this.loadMe(tx, user.id);
     });

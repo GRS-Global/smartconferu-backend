@@ -6,6 +6,7 @@ export const RESET_PASSWORD_TTL_MINUTES = 60;
 export const LOGIN_CODE_TTL_MINUTES = 10;
 export const CHANGE_EMAIL_TTL_MINUTES = 24 * 60;
 export const MERGE_CODE_TTL_MINUTES = 10;
+export const VERIFY_PROFILE_EMAIL_TTL_MINUTES = 24 * 60;
 
 const PROVIDER_NAMES: Record<string, string> = {
   google: 'Google',
@@ -24,6 +25,20 @@ export const confirmEmailChange = (to: string, url: string): EmailMessage =>
     button: { label: 'Confirm this address', url },
     footnote:
       "The link works once and expires after 24 hours. If you didn't ask for this, you can ignore this email.",
+  });
+
+export const verifyProfileEmail = (to: string, url: string): EmailMessage =>
+  renderEmail({
+    to,
+    subject: 'Verify your email address',
+    heading: 'Verify your email address',
+    paragraphs: [
+      `You added ${to} to your Smartconferu profile. Verify it to confirm the address is yours.`,
+      'Your sign-in email does not change. Once verified, you can choose this address as your primary one for notifications.',
+    ],
+    button: { label: 'Verify this address', url },
+    footnote:
+      "The link works once and expires after 24 hours. If you didn't add this address, you can ignore this email.",
   });
 
 export const emailChangeRequested = (

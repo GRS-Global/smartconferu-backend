@@ -1,0 +1,1 @@
+ALTER TYPE "public"."auth_token_purpose" ADD VALUE 'verify_profile_email';

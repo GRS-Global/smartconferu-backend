@@ -8,11 +8,20 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import { PasswordService } from '../../core/auth/password.service.js';
 import { normalizeEmail } from '../../core/auth/secrets.js';
 import { DatabaseService } from '../../core/database/database.service.js';
-import { userIdentities, users } from '../../core/database/schema/index.js';
+import {
+  profileDetails,
+  userIdentities,
+  users,
+} from '../../core/database/schema/index.js';
 import { EmailService } from '../../core/email/email.service.js';
 import { AppException, ErrorCode } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { AccountLinkingService } from '../users/account-linking.service.js';
+import {
+  EMAIL_SLOTS,
+  type EmailSlot,
+  readSlot,
+} from '../users/profile-emails.js';
 import * as emails from './auth-emails.js';
 import { AuthRepository, type UserRow } from './auth.repository.js';
 import { AuthService, type SignInOutcome } from './auth.service.js';
@@ -164,6 +173,100 @@ export class AccountService {
         emails.emailChanged(previous.old, previous.next),
       );
     }
+  }
+
+  // Profile email addresses --------------------------------------------------------------------
+
+  /**
+   * Emails a verification link to the personal / professional address saved on the profile.
+   * The sign-in email is not touched; this only proves the address is the user's.
+   */
+  async sendProfileEmailLink(
+    auth: AuthUser,
+    slot: EmailSlot,
+    client: ClientInfo,
+  ): Promise<void> {
+    const [row] = await this.database.db
+      .select({ data: profileDetails.data })
+      .from(profileDetails)
+      .where(eq(profileDetails.userId, auth.id));
+    const saved = readSlot(
+      (row?.data as Record<string, unknown> | undefined)?.emails,
+      slot,
+    );
+    if (!saved.value) {
+      throw AppException.businessRule('Save an email address first.');
+    }
+    if (saved.status === 'verified') {
+      throw AppException.businessRule('That address is already verified.');
+    }
+    const token = await this.oneTimeTokens.issueLink(
+      'verify_profile_email',
+      saved.value,
+      auth.id,
+      emails.VERIFY_PROFILE_EMAIL_TTL_MINUTES,
+    );
+    await this.email.sendQuietly(
+      emails.verifyProfileEmail(
+        saved.value,
+        `${this.appUrl}/verify-profile-email?token=${encodeURIComponent(token)}`,
+      ),
+    );
+    await this.audit.record({
+      action: 'profile.email_verification_sent',
+      actorId: auth.id,
+      client,
+      data: { slot },
+    });
+  }
+
+  /** From the emailed link: the address is proven, so its slot becomes "verified". */
+  async confirmProfileEmail(token: string, client: ClientInfo): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const consumed = await this.oneTimeTokens.consumeLink(
+        'verify_profile_email',
+        token,
+        tx,
+      );
+      const invalid = () =>
+        new AppException(
+          HttpStatus.BAD_REQUEST,
+          ErrorCode.AUTH_INVALID_LINK,
+          'This link has expired or was already used. Please ask for a new one.',
+        );
+      if (!consumed?.userId) throw invalid();
+      const [row] = await tx
+        .select({ data: profileDetails.data })
+        .from(profileDetails)
+        .where(eq(profileDetails.userId, consumed.userId))
+        .for('update');
+      const data = {
+        ...((row?.data as Record<string, unknown> | undefined) ?? {}),
+      };
+      const stored = (data.emails ?? {}) as Record<string, unknown>;
+      // The address may have been changed or removed after the link was sent.
+      const slot = EMAIL_SLOTS.find(
+        (s) => readSlot(stored, s).value.toLowerCase() === consumed.email,
+      );
+      if (!slot) throw invalid();
+      data.emails = {
+        ...stored,
+        [slot]: { value: readSlot(stored, slot).value, status: 'verified' },
+      };
+      await tx
+        .update(profileDetails)
+        .set({ data })
+        .where(eq(profileDetails.userId, consumed.userId));
+      await this.audit.record(
+        {
+          action: 'profile.email_verified',
+          actorId: consumed.userId,
+          client,
+          data: { slot },
+        },
+        tx,
+      );
+    });
   }
 
   // Sessions -----------------------------------------------------------------------------------

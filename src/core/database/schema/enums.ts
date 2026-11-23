@@ -20,6 +20,8 @@ export const authTokenPurpose = pgEnum('auth_token_purpose', [
   'merge_account',
   /** The emailed second step of a super admin's password sign-in (admin console). */
   'mfa_email_code',
+  /** Proves a personal / professional address saved under My Profile › Email addresses. */
+  'verify_profile_email',
 ]);
 
 // Conferences --------------------------------------------------------------------------------

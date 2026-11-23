@@ -34,6 +34,7 @@ import {
   MessageResponse,
   MfaCodeDto,
   MfaRequiredResponse,
+  ProfileEmailSlotDto,
   SessionResponse,
   SignInWithCodeDto,
   TokenDto,
@@ -146,6 +147,36 @@ export class AccountController {
     @Client() client: ClientInfo,
   ): Promise<void> {
     await this.account.confirmEmailChange(dto.token, client);
+  }
+
+  @Post('profile-emails/verify')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Email a verification link to the personal / professional address saved on the profile (also used to resend it). The sign-in email is not changed.',
+  })
+  @ApiAcceptedResponse({ type: MessageResponse })
+  async verifyProfileEmail(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ProfileEmailSlotDto,
+    @Client() client: ClientInfo,
+  ): Promise<MessageResponse> {
+    await this.account.sendProfileEmailLink(user, dto.slot, client);
+    return { message: 'Check that address for a verification link.' };
+  }
+
+  @Public()
+  @Post('profile-emails/confirm')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Verify the profile address from the emailed link' })
+  @ApiNoContentResponse()
+  async confirmProfileEmail(
+    @Body() dto: TokenDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    await this.account.confirmProfileEmail(dto.token, client);
   }
 
   // Sessions -----------------------------------------------------------------------------------

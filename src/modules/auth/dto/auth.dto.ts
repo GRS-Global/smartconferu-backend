@@ -3,6 +3,7 @@ import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -247,6 +248,15 @@ export class DeleteAccountDto {
   @IsString()
   @MaxLength(20)
   confirm: string;
+}
+
+export class ProfileEmailSlotDto {
+  @ApiProperty({
+    enum: ['personal', 'professional'],
+    description: 'Which saved address to verify.',
+  })
+  @IsIn(['personal', 'professional'])
+  slot: 'personal' | 'professional';
 }
 
 export class ChangeEmailDto {
