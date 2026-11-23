@@ -23,6 +23,7 @@ import { StorageModule } from './core/storage/storage.module.js';
 import { RbacModule } from './core/rbac/rbac.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
 import { MasterDataModule } from './modules/master-data/master-data.module.js';
+import { ProfileVerificationModule } from './modules/profile-verification/profile-verification.module.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ConferencesModule } from './modules/conferences/conferences.module.js';
 import { AiModule } from './modules/ai/ai.module.js';
@@ -112,6 +113,7 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
     AiModule,
     AdminModule,
     MasterDataModule,
+    ProfileVerificationModule,
   ],
   controllers: [HealthController],
   providers: [

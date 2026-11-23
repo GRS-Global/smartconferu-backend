@@ -464,7 +464,7 @@ export class MasterDataService {
   }
 
   /** A key not used yet: the slug, or the slug with -2, -3… */
-  private async freeKey(
+  async freeKey(
     text: string,
     tx: Executor,
     kind: 'society' | 'institution',

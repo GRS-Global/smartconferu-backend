@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { createdAt, updatedAt } from './columns.js';
+import { createdAt, timestamptz, updatedAt } from './columns.js';
 import { users } from './identity.js';
 
 /**
@@ -115,6 +115,54 @@ export const researchAreas = pgTable(
     check(
       'research_areas_level_check',
       sql`(${t.parentId} is null) = (${t.groupLabel} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * Names members typed that are not on the lists yet (a new institution under My Profile ›
+ * Affiliation, a new society under Memberships). The member can use it straight away ("Pending
+ * review"); the Super Admin approves it into the master data, or rejects it. One row per person
+ * and name; the console shows people who typed the same name as one item.
+ */
+export const profileRequests = pgTable(
+  'profile_requests',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    kind: text().notNull(),
+    /** The name as typed. */
+    name: text().notNull(),
+    /** Lower-case letters and digits only: the same name typed twice is one item. */
+    nameKey: text('name_key').notNull(),
+    /** A secondary research area: the primary area it was typed under. */
+    parentName: text('parent_name'),
+    /** A society's website (the admin checks it before approving). */
+    url: text(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text().notNull().default('pending'),
+    /** What the name became (approved: the list entry's name) . */
+    resolvedName: text('resolved_name'),
+    /** The list entry it was approved into or mapped to (institutions.id / societies.id). */
+    resolvedId: uuid('resolved_id'),
+    reason: text(),
+    resolvedBy: uuid('resolved_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    resolvedAt: timestamptz('resolved_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('profile_requests_unique').on(t.kind, t.nameKey, t.userId),
+    index('profile_requests_status_idx').on(t.status, t.createdAt),
+    check(
+      'profile_requests_kind_check',
+      sql`${t.kind} in ('institution', 'society', 'research_area')`,
+    ),
+    check(
+      'profile_requests_status_check',
+      sql`${t.status} in ('pending', 'approved', 'rejected')`,
     ),
   ],
 );

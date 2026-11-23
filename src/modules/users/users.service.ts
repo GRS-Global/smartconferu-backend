@@ -6,6 +6,7 @@ import { AppException } from '../../core/errors/app.exception.js';
 import type { DashboardResponse } from './dto/dashboard.response.js';
 import type { MeResponse, MyConferenceResponse } from './dto/me.response.js';
 import type { UpdateMeDto } from './dto/update-me.dto.js';
+import { ProfileRequestsService } from '../master-data/profile-requests.service.js';
 import { guardProfileEmails } from './profile-emails.js';
 import { type ProfileUpdate, UsersRepository } from './users.repository.js';
 
@@ -15,6 +16,7 @@ export class UsersService {
   constructor(
     private readonly database: DatabaseService,
     private readonly users: UsersRepository,
+    private readonly profileRequests: ProfileRequestsService,
   ) {}
 
   getMe(user: AuthUser): Promise<MeResponse> {
@@ -53,6 +55,12 @@ export class UsersService {
         if (!(await this.users.updateDetails(tx, user.id, guarded.details))) {
           throw AppException.notFound('Your profile');
         }
+        // A new institution or society the member typed goes to the Super Admin's review queue.
+        await this.profileRequests.syncFromProfile(
+          tx,
+          user.id,
+          guarded.details,
+        );
       }
       return this.loadMe(tx, user.id);
     });

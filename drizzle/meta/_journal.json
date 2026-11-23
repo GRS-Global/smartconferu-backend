@@ -113,6 +113,27 @@
       "when": 1795411755675,
       "tag": "0015_verify_profile_email",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795429789840,
+      "tag": "0016_profile_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795430707520,
+      "tag": "0017_profile_requests_research_areas",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795435780935,
+      "tag": "0018_profile_verifications",
+      "breakpoints": true
     }
   ]
 }
