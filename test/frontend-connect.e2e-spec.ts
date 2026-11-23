@@ -574,13 +574,17 @@ describe('Frontend connection helpers', () => {
         "select title from notifications where kind = 'fix_requested' and user_id = $1",
         [author.id],
       );
+      // one bell notification (the Emails tab also lists the email copy of it), dated like the email: "1 Mar 2099", not "2099-03-01"
       expect(bell.rows).toHaveLength(1);
+      expect(JSON.stringify(bell.rows[0])).toContain('by 1 Mar 2099');
       await t.sendQueuedEmails();
       expect(
         t
           .outbox()
           .some(
-            (m) => m.to === author.email && /Please fix .* by/.test(m.subject),
+            (m) =>
+              m.to === author.email &&
+              /Please fix .* by 1 Mar 2099/.test(m.subject),
           ),
       ).toBe(true);
       // the corrected file answers it

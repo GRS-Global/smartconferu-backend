@@ -5,7 +5,7 @@ import { DatabaseService } from '../../core/database/database.service.js';
 import type { Executor, Tx } from '../../core/database/database.types.js';
 import { EmailQueueService } from '../../core/email/email-queue.service.js';
 import { EmailRecipientsService } from '../../core/email/email-recipients.service.js';
-import { stripTags } from '../../core/email/email-render.js';
+import { emailDate, stripTags } from '../../core/email/email-render.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
@@ -510,7 +510,8 @@ export class SubmissionsService {
         await this.submissions.linkedUserIds(tx, submissionId),
         {
           kind: 'fix_requested',
-          title: `Please fix ${pid} by ${dto.fixBy}`,
+          // The same wording as the email about it ("by 1 Mar 2099"), not the raw 2099-03-01.
+          title: `Please fix ${pid} by ${emailDate(dto.fixBy)}`,
           body: dto.issue,
           conferenceId: info.id,
           submissionId,
