@@ -3,6 +3,8 @@ import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
 import type { Executor } from '../../core/database/database.types.js';
 import { AppException } from '../../core/errors/app.exception.js';
+import { FileStorage } from '../../core/storage/file-storage.js';
+import { storagePaths } from '../../core/storage/storage-paths.js';
 import type { DashboardResponse } from './dto/dashboard.response.js';
 import type { MeResponse, MyConferenceResponse } from './dto/me.response.js';
 import type { UpdateMeDto } from './dto/update-me.dto.js';
@@ -17,6 +19,7 @@ export class UsersService {
     private readonly database: DatabaseService,
     private readonly users: UsersRepository,
     private readonly profileRequests: ProfileRequestsService,
+    private readonly storage: FileStorage,
   ) {}
 
   getMe(user: AuthUser): Promise<MeResponse> {
@@ -25,7 +28,11 @@ export class UsersService {
 
   updateMe(user: AuthUser, dto: UpdateMeDto): Promise<MeResponse> {
     // A profile may only point at a photo in the user's own folder.
-    if (dto.photoPath && !dto.photoPath.startsWith(`${user.id}/`)) {
+    const folder = storagePaths.userFolder(user.id);
+    if (
+      dto.photoPath &&
+      (!dto.photoPath.startsWith(folder) || dto.photoPath.includes('..'))
+    ) {
       throw AppException.validation(
         'The photo must be uploaded to your own folder.',
         [{ field: 'photoPath', errors: ['must start with your user id'] }],
@@ -38,6 +45,15 @@ export class UsersService {
     );
 
     return this.database.transaction(async (tx) => {
+      // A replaced or removed photo is deleted once the change is saved.
+      if (dto.photoPath !== undefined) {
+        const before = (await this.users.findProfile(tx, user.id))?.photoPath;
+        if (before && before !== dto.photoPath && before.startsWith(folder)) {
+          this.database.afterCommit(tx, () =>
+            this.storage.delete(before).catch(() => undefined),
+          );
+        }
+      }
       if (
         Object.keys(columns).length > 0 &&
         !(await this.users.updateProfile(tx, user.id, columns))

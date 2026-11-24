@@ -13,7 +13,7 @@ export class UploadedFileResponse {
   @ApiProperty({
     description:
       'Storage path. Keep it (e.g. PATCH /me { photoPath }) and read the file back with GET /files?path=.',
-    example: '3f0c…/photo-9a1b….png',
+    example: 'users/3f0c…/photo-9a1b….png',
   })
   path: string;
 

@@ -28,6 +28,7 @@ import {
 import { STAGE_OUTCOMES } from './submission.mapper.js';
 import { SubmissionsRepository } from './submissions.repository.js';
 import { SubmissionsService } from './submissions.service.js';
+import { storagePaths } from '../../core/storage/storage-paths.js';
 
 /**
  * The chair's side of a new paper: the screening record of each version (Initial Check and
@@ -188,8 +189,8 @@ export class ScreeningService {
       // The automatic check belongs to the file, not to the chair's record.
       const { auto: _auto, ...own } = record;
       validateScreeningRecord(own, {
-        folder: `${submission.conferenceId}/${submissionId}/`,
-        reportsFolder: `conferences/${submission.conferenceId}/screening/`,
+        // The paper's own folder holds its versions and its plagiarism reports.
+        folder: storagePaths.paperFolder(submission.conferenceId, submissionId),
         initialCheck: screeningConfigOf(conference).settings.initialCheck,
       });
 

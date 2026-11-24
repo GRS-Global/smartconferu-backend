@@ -108,6 +108,8 @@ export async function createTestApp(
     AI_AUTO_INGEST: 'false',
     // PGlite's socket server doesn't relay LISTEN/NOTIFY (fan-out is unit tested).
     REALTIME_FANOUT: 'false',
+    // Always a temporary folder: a developer's .env may point at a real bucket.
+    FILE_STORAGE_DRIVER: 'local',
     FILE_STORAGE_DIR: storageDir,
     SWAGGER_ENABLED: 'false',
     // Tests send many auth requests from one address; rate limits are not what they test.

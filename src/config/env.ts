@@ -2,6 +2,13 @@ import { z } from 'zod';
 
 const bool = z.enum(['true', 'false']).transform((value) => value === 'true');
 
+/** Text that may be left empty in the .env file; empty counts as not set. */
+const optionalText = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => value || undefined);
+
 /** A PEM key, given either as-is or base64-encoded (easier to keep on one line in a secret store). */
 const pem = z.string().transform((value, ctx) => {
   const text = value.includes('-----BEGIN')
@@ -133,10 +140,23 @@ const envSchema = z.object({
   /** How often the jobs run; each job decides itself what is due (reminders go out once a day). */
   JOBS_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
 
-  /** Where uploaded files (papers, reports) are kept. `local`: a folder on this machine (development). */
-  FILE_STORAGE_DRIVER: z.enum(['local']).default('local'),
+  /**
+   * Where uploaded files (papers, photos, reports) are kept. `local`: a folder on this machine
+   * (development, tests). `s3`: a bucket of an S3-compatible store (Cloudflare R2, DigitalOcean
+   * Spaces, MinIO, AWS S3), set with the S3_* values.
+   */
+  FILE_STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   /** The folder for FILE_STORAGE_DRIVER=local. */
   FILE_STORAGE_DIR: z.string().default('./storage'),
+  /** The store's API address, without the bucket, e.g. https://<account id>.r2.cloudflarestorage.com. */
+  S3_ENDPOINT: optionalText.pipe(z.url().optional()),
+  /** The region; Cloudflare R2 uses "auto". */
+  S3_REGION: z.string().trim().min(1).default('auto'),
+  S3_BUCKET: optionalText,
+  S3_ACCESS_KEY_ID: optionalText,
+  S3_SECRET_ACCESS_KEY: optionalText,
+  /** Address the bucket as <endpoint>/<bucket> (true) or <bucket>.<endpoint> (false). */
+  S3_FORCE_PATH_STYLE: bool.default(true),
   /** Largest file accepted, in megabytes. */
   MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(100).default(25),
 
@@ -166,6 +186,22 @@ export function validateEnv(raw: Record<string, unknown>): Env {
           path: ['EMAIL_TRANSPORT'],
           message: 'must not be "log" in production',
         });
+      }
+      if (env.FILE_STORAGE_DRIVER === 's3') {
+        for (const name of [
+          'S3_ENDPOINT',
+          'S3_BUCKET',
+          'S3_ACCESS_KEY_ID',
+          'S3_SECRET_ACCESS_KEY',
+        ] as const) {
+          if (!env[name]) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [name],
+              message: 'is required when FILE_STORAGE_DRIVER=s3',
+            });
+          }
+        }
       }
       if (env.NODE_ENV === 'production' && env.DEV_SHOW_EMAIL_CODES) {
         ctx.addIssue({

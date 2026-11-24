@@ -13,6 +13,7 @@ import { NotificationsService } from '../../core/notifications/notifications.ser
 import * as rules from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
 import { FileStorage } from '../../core/storage/file-storage.js';
+import { storagePaths } from '../../core/storage/storage-paths.js';
 import type { PaperFileUploadResponse } from './dto/screening.dto.js';
 import { type AutoCheck, parseAutoCheck } from './screening/auto-check.js';
 import { AutoInitialCheckService } from './screening/auto-initial-check.service.js';
@@ -169,7 +170,18 @@ export class SubmissionFilesService {
               ? 'camera_ready'
               : 'revision';
         const version = supplementary ? 1 : versions + 1;
-        storedKey = `${submission.conferenceId}/${submissionId}/${Date.now().toString(36)}-${safeName}`;
+        const tag = Date.now().toString(36);
+        storedKey = supplementary
+          ? storagePaths.supportingFile(submission.conferenceId, submissionId, {
+              tag,
+              name: safeName,
+            })
+          : storagePaths.paperVersion(submission.conferenceId, submissionId, {
+              version,
+              cameraReady: kind === 'camera_ready',
+              tag,
+              name: safeName,
+            });
         await this.storage.put(storedKey, file.buffer, TYPES[type].mime);
         const row = await this.submissions.insertFile(tx, {
           submissionId,

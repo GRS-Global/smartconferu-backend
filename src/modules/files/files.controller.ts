@@ -1,9 +1,11 @@
 import {
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   ParseEnumPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   StreamableFile,
@@ -57,6 +59,13 @@ export class FilesController {
     description:
       'UUID or slug. Required for conference_logo, review_instructions_pdf and screening_report (chairs).',
   })
+  @ApiQuery({
+    name: 'submissionId',
+    required: false,
+    type: String,
+    description:
+      'The paper a screening_report belongs to (required for it); the report is kept with the paper.',
+  })
   @ApiBody({
     schema: {
       type: 'object',
@@ -73,16 +82,27 @@ export class FilesController {
     @CurrentUser() user: AuthUser,
     @Query('purpose', new ParseEnumPipe(FILE_PURPOSES)) purpose: FilePurpose,
     @Query('conferenceId', ConferenceRefPipe) conferenceId: string | undefined,
+    @Query('submissionId', new ParseUUIDPipe({ optional: true }))
+    submissionId: string | undefined,
     @UploadedFile() file: Upload | undefined,
     @Client() client: ClientInfo,
   ): Promise<UploadedFileResponse> {
-    return this.files.upload(user, purpose, conferenceId, file, client);
+    return this.files.upload(
+      user,
+      purpose,
+      conferenceId,
+      file,
+      client,
+      submissionId,
+    );
   }
 
   /** Profile photos and conference logos are shown in <img> tags and on public pages, so they can be read without a token. */
   @Public()
   @Get('public')
   @HttpCode(HttpStatus.OK)
+  // The web app runs on another origin; helmet's default (same-origin) would stop its <img> tags.
+  @Header('Cross-Origin-Resource-Policy', 'cross-origin')
   @ApiProduces('image/png', 'image/jpeg', 'image/webp')
   @ApiOperation({
     summary:
