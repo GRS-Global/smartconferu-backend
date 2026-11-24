@@ -73,6 +73,41 @@ describe('validateEnv', () => {
     ).toThrow(/RESEND_API_KEY: is required/);
   });
 
+  it('keeps files in a local folder unless S3 storage is set up in full', () => {
+    expect(
+      validateEnv({ ...minimal, S3_ENDPOINT: '', S3_BUCKET: '' }),
+    ).toMatchObject({
+      FILE_STORAGE_DRIVER: 'local',
+      S3_REGION: 'auto',
+      S3_FORCE_PATH_STYLE: true,
+    });
+    expect(() =>
+      validateEnv({
+        ...minimal,
+        FILE_STORAGE_DRIVER: 's3',
+        S3_BUCKET: 'papers',
+      }),
+    ).toThrow(
+      /S3_ENDPOINT: is required[\s\S]*S3_ACCESS_KEY_ID: is required[\s\S]*S3_SECRET_ACCESS_KEY: is required/,
+    );
+    expect(() => validateEnv({ ...minimal, S3_ENDPOINT: 'not a url' })).toThrow(
+      /S3_ENDPOINT/,
+    );
+
+    const env = validateEnv({
+      ...minimal,
+      FILE_STORAGE_DRIVER: 's3',
+      S3_ENDPOINT: 'https://abc.r2.cloudflarestorage.com',
+      S3_BUCKET: 'papers',
+      S3_ACCESS_KEY_ID: 'id',
+      S3_SECRET_ACCESS_KEY: 'secret',
+    });
+    expect(env).toMatchObject({
+      FILE_STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'papers',
+    });
+  });
+
   it('never shows sign-in codes in API responses in production', () => {
     expect(validateEnv(minimal).DEV_SHOW_EMAIL_CODES).toBe(false);
     expect(() =>

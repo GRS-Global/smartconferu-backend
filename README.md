@@ -56,7 +56,7 @@ smartconferu-backend/
 │  │  ├─ health/           /health (process up), /health/ready (database reachable)
 │  │  ├─ notifications/    in-app notifications (the bell), written with each change
 │  │  ├─ realtime/         LiveEventsService: pushes new notifications to open SSE streams
-│  │  ├─ storage/          FileStorage: uploaded files (local folder; S3-compatible later)
+│  │  ├─ storage/          FileStorage: uploaded files (local folder or S3-compatible bucket)
 │  │  ├─ plan/             PlanService: which paid features a conference has (all free now)
 │  │  └─ validation/       shared input validators
 │  ├─ modules/             features, one folder each
@@ -193,7 +193,7 @@ How it works:
   12 hours without use; this carries through the code step and every refresh
   (`sessions.persistent`).
 - **Trust this device (admin console):** `POST /auth/mfa/verify` with `trustDevice: true` after
-  the *emailed* admin code sets an httpOnly `sc_trusted` cookie for 14 days (only its hash is kept,
+  the _emailed_ admin code sets an httpOnly `sc_trusted` cookie for 14 days (only its hash is kept,
   in `trusted_devices`, tied to that admin). A password sign-in from that browser then skips the
   emailed code and is a verified session (audit: `secondFactor: "trusted_device"`). It never
   replaces the password, vouches only for the admin who trusted it, and does not apply to
@@ -252,8 +252,29 @@ How it works:
   stores the next paper version (v1, v2 …; PDF or Word, checked by content, up to
   `MAX_UPLOAD_MB`). The first one moves the paper from `upload_pending` to `no_decision`; later
   ones tell the chairs there is a new version to check. `GET /submissions/{id}/files/{fileId}`
-  downloads it. Files go through `FileStorage` (`core/storage`): a local folder now, an
-  S3-compatible driver once the hosting is chosen.
+  downloads it. Files go through `FileStorage` (`core/storage`): a local folder
+  (`FILE_STORAGE_DRIVER=local`, the default) or a private bucket of any S3-compatible store
+  (`s3`: Cloudflare R2 now, DigitalOcean Spaces or MinIO work the same). Downloads always go
+  through the API, so the bucket is never public. The API checks the bucket at start and refuses to
+  start when it can't use it. Paths are built in one place (`core/storage/storage-paths.ts`):
+
+  ```
+  users/<user>/photo-<id>.<ext>                 profile photo; the old one is deleted on change
+  conferences/<conference>/                     one folder = one conference's backup
+    branding/logo-<id>.<ext>
+    documents/review-instructions-<id>.pdf
+    papers/<submission>/
+      versions/v<n>-[camera-ready-]<tag>-<name>  every version is kept
+      plagiarism/report-<id>.pdf                 POST /files?purpose=screening_report&submissionId=
+      supporting/<tag>-<name>                    supplementary files
+  ```
+
+  Files are deleted only when a chair deletes the paper for good, when a user deletes their account
+  (their `users/<user>/` folder; papers stay with the conference) or when a logo or photo is
+  replaced. Certificates and flyers are drawn from their design and the issued record when
+  downloaded, so only their design images will be stored (`conferences/<conference>/certificates/`,
+  `…/flyers/`, with that module).
+
 - **Screening:** `GET/PUT /conferences/{id}/screening-settings` (steps, criteria, AI mode).
   `PUT /submissions/{id}/screening/{version}` saves the chair's record of that version (checked:
   the version must exist, allowed decisions, page counts, percentages, dates, file paths, and the
@@ -353,15 +374,15 @@ How it works:
 
 Every `/admin/…` route needs a super admin in a two-step-verified session (`@SuperAdminOnly()`).
 
-| Area                  | Endpoints                                                                                                        |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Dashboard             | `GET /admin/stats`, `GET /admin/stats/activity?year=` (monthly chart), `GET /admin/activity` (`?action=`, `?actorId=`, `?entityId=`, `?from=`, `?to=`, `?q=`, `?before=`) |
-| Conferences, requests | `GET /admin/conferences` (+ `papers`, `licenseExpiry`, `onTrial`, `suspended`), `POST /admin/conferences/:id/decision`, `…/ask-info`, `…/license` ⚑, `…/suspend` ⚑, `…/reactivate` ⚑, `…/undelete`, `…/papers` |
-| Deletion requests     | `GET /admin/deletion-requests`, `POST /admin/deletion-requests/:id/decision`                                     |
-| Queue work            | `GET /admin/queues/:queue` (claims + notes), `PUT/DELETE …/:itemId/claim`, `POST …/:itemId/notes`; queues `requests`, `deletions`, `licenses`, `cfps` |
+| Area                  | Endpoints                                                                                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dashboard             | `GET /admin/stats`, `GET /admin/stats/activity?year=` (monthly chart), `GET /admin/activity` (`?action=`, `?actorId=`, `?entityId=`, `?from=`, `?to=`, `?q=`, `?before=`)                                                      |
+| Conferences, requests | `GET /admin/conferences` (+ `papers`, `licenseExpiry`, `onTrial`, `suspended`), `POST /admin/conferences/:id/decision`, `…/ask-info`, `…/license` ⚑, `…/suspend` ⚑, `…/reactivate` ⚑, `…/undelete`, `…/papers`                 |
+| Deletion requests     | `GET /admin/deletion-requests`, `POST /admin/deletion-requests/:id/decision`                                                                                                                                                   |
+| Queue work            | `GET /admin/queues/:queue` (claims + notes), `PUT/DELETE …/:itemId/claim`, `POST …/:itemId/notes`; queues `requests`, `deletions`, `licenses`, `cfps`                                                                          |
 | Users                 | `GET /admin/users`, `GET /admin/users/:id` (conferences, recent activity), `POST …/suspend`, `POST …/reactivate`, `GET …/sessions`, `DELETE …/sessions/:sessionId`, `POST …/reset-mfa` ⚑, `POST …/merge` ⚑, `POST …/view-as` ⚑ |
-| Master data           | `/admin/master-data/societies`, `…/institutions` (+ `/:id/merge`), `…/research-areas`                            |
-| Email templates       | `/admin/email-templates` (see below)                                                                             |
+| Master data           | `/admin/master-data/societies`, `…/institutions` (+ `/:id/merge`), `…/research-areas`                                                                                                                                          |
+| Email templates       | `/admin/email-templates` (see below)                                                                                                                                                                                           |
 
 - **⚑ Step-up ("Confirm it's you"):** these need a fresh second-factor code in this session within
   the last 10 minutes (`@StepUp()`); otherwise 403 `AUTH_STEP_UP_REQUIRED`. `POST /auth/step-up/code`
@@ -569,12 +590,13 @@ npm run build
 
 ### Optional settings
 
-| Feature                            | In `.env`                                                | Note                                                                             |
-| ---------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Real emails                        | `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY`, `EMAIL_FROM` | `EMAIL_FROM` must use a domain verified in Resend                                |
-| AI features                        | `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`                    | Without them the AI endpoints answer with an error                               |
-| Google / Microsoft / ORCID sign-in | `<PROVIDER>_CLIENT_ID`, `<PROVIDER>_CLIENT_SECRET`       | Register `http://localhost:3000/api/v1/auth/oauth/<provider>/callback` with each |
-| The web app calling the API        | `APP_URL`, `CORS_ORIGINS`                                | Already set for Vite on `http://localhost:5173`                                  |
+| Feature                            | In `.env`                                                                                        | Note                                                                                                                                               |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Real emails                        | `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY`, `EMAIL_FROM`                                         | `EMAIL_FROM` must use a domain verified in Resend                                                                                                  |
+| AI features                        | `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`                                                            | Without them the AI endpoints answer with an error                                                                                                 |
+| Google / Microsoft / ORCID sign-in | `<PROVIDER>_CLIENT_ID`, `<PROVIDER>_CLIENT_SECRET`                                               | Register `http://localhost:3000/api/v1/auth/oauth/<provider>/callback` with each                                                                   |
+| The web app calling the API        | `APP_URL`, `CORS_ORIGINS`                                                                        | Already set for Vite on `http://localhost:5173`                                                                                                    |
+| Files in Cloudflare R2 (or any S3) | `FILE_STORAGE_DRIVER=s3`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | R2: endpoint `https://<account id>.r2.cloudflarestorage.com` (no bucket), `S3_REGION=auto`, an R2 API token with Object Read & Write on the bucket |
 
 ### Trying the API from /docs
 

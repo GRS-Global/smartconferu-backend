@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { Env } from '../../config/env.js';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
-import { conferences } from '../../core/database/schema/index.js';
+import { conferences, submissions } from '../../core/database/schema/index.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import * as rules from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
 import { FileStorage } from '../../core/storage/file-storage.js';
+import { storagePaths } from '../../core/storage/storage-paths.js';
 import type { FilePurpose, UploadedFileResponse } from './dto/files.dto.js';
 
 export interface UploadedFile {
@@ -61,7 +62,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 /** Every storage path this module hands out; anything else is refused. */
 const PATH = new RegExp(
-  `^(?:(?<user>${UUID})/photo-${UUID}\\.(?:png|jpg|webp)|conferences/(?<conference>${UUID})/(?:(?<logo>logo-${UUID}\\.(?:png|jpg|webp))|(?<instructions>instructions-${UUID}\\.pdf)|(?<screening>screening/${UUID}\\.pdf)))$`,
+  `^(?:users/(?<user>${UUID})/photo-${UUID}\\.(?:png|jpg|webp)|conferences/(?<conference>${UUID})/(?:branding/(?<logo>logo-${UUID}\\.(?:png|jpg|webp))|documents/(?<instructions>review-instructions-${UUID}\\.pdf)|papers/${UUID}/plagiarism/(?<screening>report-${UUID}\\.pdf)))$`,
 );
 
 export type PathKind = 'photo' | 'logo' | 'instructions' | 'screening';
@@ -87,6 +88,7 @@ export class FilesService {
     conferenceId: string | undefined,
     file: UploadedFile | undefined,
     client?: ClientInfo,
+    submissionId?: string,
   ): Promise<UploadedFileResponse> {
     if (!file?.buffer?.length) {
       throw AppException.validation('Choose a file to upload.', [
@@ -126,6 +128,28 @@ export class FilesService {
         );
       }
     }
+    // A plagiarism report is kept with its paper.
+    if (purpose === 'screening_report') {
+      const [paper] = submissionId
+        ? await this.database.db
+            .select({ id: submissions.id })
+            .from(submissions)
+            .where(
+              and(
+                eq(submissions.id, submissionId),
+                eq(submissions.conferenceId, conferenceId!),
+              ),
+            )
+        : [];
+      if (!paper) {
+        throw AppException.validation('This report needs its paper.', [
+          {
+            field: 'submissionId',
+            errors: ['must be a paper of this conference'],
+          },
+        ]);
+      }
+    }
 
     if (file.size > limit) {
       throw AppException.validation(
@@ -147,16 +171,16 @@ export class FilesService {
     const ext = KINDS[kind].ext;
     switch (purpose) {
       case 'profile_photo':
-        key = `${user.id}/photo-${id}.${ext}`;
+        key = storagePaths.profilePhoto(user.id, id, ext);
         break;
       case 'conference_logo':
-        key = `conferences/${conferenceId}/logo-${id}.${ext}`;
+        key = storagePaths.conferenceLogo(conferenceId!, id, ext);
         break;
       case 'review_instructions_pdf':
-        key = `conferences/${conferenceId}/instructions-${id}.pdf`;
+        key = storagePaths.reviewInstructions(conferenceId!, id);
         break;
       case 'screening_report':
-        key = `conferences/${conferenceId}/screening/${id}.pdf`;
+        key = storagePaths.plagiarismReport(conferenceId!, submissionId!, id);
         break;
     }
     await this.storage.put(key, file.buffer, KINDS[kind].mime);

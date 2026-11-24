@@ -19,6 +19,7 @@ import {
 import { AppException, ErrorCode } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { FileStorage } from '../../core/storage/file-storage.js';
+import { storagePaths } from '../../core/storage/storage-paths.js';
 
 const plural = (n: number, one: string, many: string) =>
   `${n} ${n === 1 ? one : many}`;
@@ -81,7 +82,9 @@ export class AccountDeletionService {
     });
 
     // After the commit: a failure here must not undo the deletion (files are only left behind).
-    await this.storage.deleteFolder(user.id).catch(() => undefined);
+    await this.storage
+      .deleteFolder(storagePaths.userFolder(user.id))
+      .catch(() => undefined);
   }
 
   /** What stands in the way, as sentences ready to show. Empty when the account can be deleted. */

@@ -3,8 +3,8 @@ import { dirname, resolve, sep } from 'node:path';
 
 /**
  * Where uploaded files live. Keys are paths like `<conference>/<submission>/<name>`. One
- * implementation per FILE_STORAGE_DRIVER: `local` (a folder, for development and tests) now; an
- * S3-compatible driver (DigitalOcean Spaces, Cloudflare R2, MinIO…) once the hosting is chosen.
+ * implementation per FILE_STORAGE_DRIVER: `local` (a folder, for development and tests) and `s3`
+ * (any S3-compatible store: Cloudflare R2, DigitalOcean Spaces, MinIO…, in s3-file-storage.ts).
  */
 export abstract class FileStorage {
   abstract put(key: string, data: Buffer, contentType: string): Promise<void>;

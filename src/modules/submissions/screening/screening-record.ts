@@ -32,10 +32,8 @@ const isObject = (v: unknown): v is Json =>
 export function validateScreeningRecord(
   record: Json,
   context: {
-    /** Folder the record may point to: `<conference>/<submission>/`. */
+    /** The paper's folder (its versions and plagiarism reports); the record may point only inside it. */
     folder: string;
-    /** The conference's own folder of uploaded screening reports (POST /files?purpose=screening_report). */
-    reportsFolder?: string;
     /** The conference runs the initial check (then the plagiarism step needs it passed). */
     initialCheck: boolean;
   },
@@ -145,11 +143,7 @@ export function validateScreeningRecord(
     for (const [name, path] of Object.entries(paths)) {
       if (
         typeof path !== 'string' ||
-        !(
-          path.startsWith(context.folder) ||
-          (context.reportsFolder !== undefined &&
-            path.startsWith(context.reportsFolder))
-        ) ||
+        !path.startsWith(context.folder) ||
         path.includes('..')
       ) {
         problems.push(`paths.${name} must be a file of this paper.`);

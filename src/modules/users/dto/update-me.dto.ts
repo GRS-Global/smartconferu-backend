@@ -72,7 +72,7 @@ export class UpdateMeDto {
 
   @ApiPropertyOptional({
     description:
-      "Path of an uploaded photo in the `public` bucket; must be inside the user's own folder (`<userId>/…`). Null removes the photo.",
+      "Path of an uploaded photo (POST /files?purpose=profile_photo); must be inside the user's own folder (`users/<userId>/…`). The previous photo is deleted. Null removes the photo.",
     nullable: true,
     type: String,
   })

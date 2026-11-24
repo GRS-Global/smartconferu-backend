@@ -16,6 +16,7 @@ import type {
 } from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
 import { FileStorage } from '../../core/storage/file-storage.js';
+import { storagePaths } from '../../core/storage/storage-paths.js';
 import type {
   AuthorDto,
   CountResponse,
@@ -683,7 +684,7 @@ export class SubmissionsService {
     });
     for (const id of done.ids) {
       await this.storage
-        .deleteFolder(`${done.conferenceId}/${id}/`)
+        .deleteFolder(storagePaths.paperFolder(done.conferenceId, id))
         .catch(() => undefined);
     }
     return { count: done.ids.length };

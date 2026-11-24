@@ -644,14 +644,48 @@ describe('Frontend connection helpers', () => {
       await as(author.token).get(`/submissions/${paper.id}`).expect(404);
     });
 
-    it("keeps a screening report uploaded for the conference on the paper's screening record", async () => {
+    it("keeps every version of a paper and its plagiarism reports in the paper's folder", async () => {
       const { chair, conf, author, paper } = await setup();
       await upload(author.token, paper.id).expect(201);
-      const report = await http()
-        .post(api(`/files?purpose=screening_report&conferenceId=${conf.id}`))
-        .set('Authorization', `Bearer ${chair.token}`)
-        .attach('file', PDF, 'report.pdf')
-        .expect(201);
+      await upload(author.token, paper.id).expect(201);
+      const folder = `conferences/${conf.id}/papers/${paper.id}/`;
+      const stored = await t.db.query<{
+        version: number;
+        storage_path: string;
+      }>(
+        'select version, storage_path from submission_files where submission_id = $1 order by version',
+        [paper.id],
+      );
+      // A new version never replaces the earlier one.
+      expect(stored.rows.map((r) => r.version)).toEqual([1, 2]);
+      expect(stored.rows[0].storage_path).toMatch(
+        new RegExp(`^${folder}versions/v1-[a-z0-9]+-`),
+      );
+      expect(stored.rows[1].storage_path).toMatch(
+        new RegExp(`^${folder}versions/v2-[a-z0-9]+-`),
+      );
+
+      const reportUpload = (query: string) =>
+        http()
+          .post(
+            api(
+              `/files?purpose=screening_report&conferenceId=${conf.id}${query}`,
+            ),
+          )
+          .set('Authorization', `Bearer ${chair.token}`)
+          .attach('file', PDF, 'report.pdf');
+      // A report belongs to a paper of this conference.
+      await reportUpload('').expect(400);
+      await reportUpload(`&submissionId=${chair.id}`).expect(400);
+      const report = await reportUpload(`&submissionId=${paper.id}`).expect(
+        201,
+      );
+      expect(report.body.path).toMatch(
+        new RegExp(`^${folder}plagiarism/report-[0-9a-f-]{36}\\.pdf$`),
+      );
+      await as(chair.token)
+        .get(`/files?path=${encodeURIComponent(report.body.path)}`)
+        .expect(200);
       const save = (paths: Record<string, string>) =>
         send('put', chair.token, `/submissions/${paper.id}/screening/1`, {
           record: { paths },
@@ -683,7 +717,9 @@ describe('Frontend connection helpers', () => {
         .set('Authorization', `Bearer ${user.token}`)
         .attach('file', png, 'me.png')
         .expect(201);
-      expect(up.body.path).toMatch(new RegExp(`^${user.id}/photo-.+\\.png$`));
+      expect(up.body.path).toMatch(
+        new RegExp(`^users/${user.id}/photo-.+\\.png$`),
+      );
       expect(up.body.contentType).toBe('image/png');
       const audit = await t.db.query<{
         entity_type: string;
@@ -710,10 +746,33 @@ describe('Frontend connection helpers', () => {
         .get(`/files?path=${encodeURIComponent(up.body.path)}`)
         .expect(200);
       expect(read.headers['content-type']).toContain('image/png');
-      await http()
+      const shown = await http()
         .get(api(`/files/public?path=${encodeURIComponent(up.body.path)}`))
         .expect(200);
+      // The web app (another origin) may show it in an <img>; other routes stay same-origin.
+      expect(shown.headers['cross-origin-resource-policy']).toBe(
+        'cross-origin',
+      );
+      expect(read.headers['cross-origin-resource-policy']).toBe('same-origin');
       await http().get(api('/files/public?path=../../etc/passwd')).expect(404);
+
+      // A new photo replaces the old one, whose file is deleted.
+      const next = await http()
+        .post(api('/files?purpose=profile_photo'))
+        .set('Authorization', `Bearer ${user.token}`)
+        .attach('file', png, 'me2.png')
+        .expect(201);
+      await http()
+        .patch(api('/me'))
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ photoPath: next.body.path })
+        .expect(200);
+      await http()
+        .get(api(`/files/public?path=${encodeURIComponent(up.body.path)}`))
+        .expect(404);
+      await http()
+        .get(api(`/files/public?path=${encodeURIComponent(next.body.path)}`))
+        .expect(200);
     });
 
     it('refuses a file that is not what it says, and one that is too big', async () => {
@@ -750,6 +809,9 @@ describe('Frontend connection helpers', () => {
         .get(`/conferences/${conf.id}`)
         .expect(200);
       expect(got.body.logoPath).toBe(up.body.path);
+      expect(up.body.path).toMatch(
+        new RegExp(`^conferences/${conf.id}/branding/logo-.+\\.png$`),
+      );
       await http()
         .get(api(`/files/public?path=${encodeURIComponent(up.body.path)}`))
         .expect(200);
