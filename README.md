@@ -351,6 +351,22 @@ How it works:
 - **Reminders:** the jobs runner sends "N days left" and "Last day" per the conference's review
   timeline (`settings.reviewTimeline`), once per reviewer per day (`reminders/`).
 
+### Payment and attendance (until there is a registration module)
+
+A chair records by hand, per accepted paper (decision `accept` or `registered`):
+`PUT /submissions/{id}/registration` with `payment` (`not_paid` | `paid` | `waived`),
+`attendance` (`physical` | `virtual` | `null` = not known yet), `presenterEmail` (one of the
+paper's authors, or `null`) and a `note` (receipt number, amount...). Every field is sent each time.
+
+- Kept in `submission_registrations`, one row per paper (`registration.service.ts`). A paper
+  without a row is "not paid", attendance not known. The presenter is kept by email, so editing
+  the author list never loses it.
+- The paper (and the chair's list) carries `registration`: chairs see it while the paper is
+  accepted; authors once they were told it is accepted, without the note; reviewers never.
+- A paper that is no longer accepted keeps its row, hidden; it shows again if accepted again.
+  Withdrawn papers and papers not accepted are refused (422).
+- No email is sent. Each change is in Activity Logs (module "Registration", before → after).
+
 ## Notifications and live events (core/notifications, core/realtime, modules/notifications)
 
 - `NotificationsService.notify(tx, userIds, …)` saves bell notifications in the change's

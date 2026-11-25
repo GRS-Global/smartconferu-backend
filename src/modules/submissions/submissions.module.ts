@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module.js';
 import { ScreeningNoticeService } from './screening-notice.service.js';
+import { RegistrationService } from './registration.service.js';
 import { ScreeningService } from './screening.service.js';
 import { AutoInitialCheckService } from './screening/auto-initial-check.service.js';
 import { SubmissionEmailsService } from './submission-emails.service.js';
@@ -24,6 +25,7 @@ import { SubmissionsService } from './submissions.service.js';
     SubmissionsRepository,
     SubmissionsService,
     ScreeningService,
+    RegistrationService,
     ScreeningNoticeService,
     AutoInitialCheckService,
     SubmissionEmailsService,

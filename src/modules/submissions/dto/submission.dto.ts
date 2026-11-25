@@ -250,7 +250,72 @@ export class RecordDecisionDto {
   deskRejectReason?: string | null;
 }
 
+export const PAYMENT_STATUSES = ['not_paid', 'paid', 'waived'] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+export const ATTENDANCE_MODES = ['physical', 'virtual'] as const;
+export type AttendanceMode = (typeof ATTENDANCE_MODES)[number];
+
+/** An accepted paper's registration, as the chair records it. Every field is sent each time. */
+export class SaveRegistrationDto {
+  @ApiProperty({ enum: PAYMENT_STATUSES })
+  @IsIn(PAYMENT_STATUSES)
+  payment: PaymentStatus;
+
+  @ApiProperty({
+    enum: ATTENDANCE_MODES,
+    nullable: true,
+    type: String,
+    description: 'null: not known yet.',
+  })
+  @IsOptional()
+  @IsIn(ATTENDANCE_MODES)
+  attendance: AttendanceMode | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: "The presenting author: one of the paper's author emails.",
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsEmail()
+  @MaxLength(320)
+  presenterEmail: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Receipt number, amount... Chairs only.',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(1000)
+  note: string | null;
+}
+
 // Responses ---------------------------------------------------------------------------------
+
+export class RegistrationResponse {
+  @ApiProperty({ enum: PAYMENT_STATUSES }) payment: PaymentStatus;
+  @ApiProperty({ enum: ATTENDANCE_MODES, nullable: true, type: String })
+  attendance: AttendanceMode | null;
+  @ApiProperty({ nullable: true, type: String }) presenterEmail: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: "The presenter's name from the author list.",
+  })
+  presenterName: string | null;
+  @ApiProperty({ nullable: true, type: String, description: 'Chairs only.' })
+  note: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Last change (null: nothing recorded yet).',
+  })
+  updatedAt: string | null;
+}
 
 export class AuthorResponse {
   @ApiProperty() name: string;
@@ -343,6 +408,13 @@ export class SubmissionResponse {
     description: 'An open "Ask author to fix" (chairs and authors).',
   })
   fixRequest: FixRequestResponse | null;
+  @ApiProperty({
+    nullable: true,
+    type: RegistrationResponse,
+    description:
+      'Payment and attendance of an accepted paper: chairs once it is accepted, authors once they were told it is. null otherwise.',
+  })
+  registration: RegistrationResponse | null;
   @ApiProperty({ nullable: true, type: String }) withdrawnAt: string | null;
   @ApiProperty({ nullable: true, enum: ['author', 'chair'], type: String })
   withdrawnBy: string | null;

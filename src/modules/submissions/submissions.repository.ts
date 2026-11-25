@@ -9,6 +9,7 @@ import {
   reviewAssignments,
   submissionAuthors,
   submissionFiles,
+  submissionRegistrations,
   submissions,
   users,
 } from '../../core/database/schema/index.js';
@@ -16,6 +17,11 @@ import {
 export type SubmissionRow = typeof submissions.$inferSelect;
 export type AuthorRow = typeof submissionAuthors.$inferSelect;
 export type FileRow = typeof submissionFiles.$inferSelect;
+export type RegistrationRow = typeof submissionRegistrations.$inferSelect;
+export type RegistrationValues = Pick<
+  RegistrationRow,
+  'payment' | 'attendance' | 'presenterEmail' | 'note'
+>;
 
 export interface ConferenceInfo {
   id: string;
@@ -36,11 +42,12 @@ export interface NewAuthor {
   corresponding: boolean;
 }
 
-/** What a paper needs to be shown: the row, its authors and its files. */
+/** What a paper needs to be shown: the row, its authors, its files and its registration (if recorded). */
 export interface PaperBundle {
   submission: SubmissionRow;
   authors: AuthorRow[];
   files: FileRow[];
+  registration: RegistrationRow | null;
 }
 
 const lowerEmail = (email: string) => email.trim().toLowerCase();
@@ -71,6 +78,33 @@ export class SubmissionsRepository {
   }
 
   /** The next paper number of the conference (locks the counter until the transaction ends). */
+  async registration(
+    executor: Executor,
+    submissionId: string,
+  ): Promise<RegistrationRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(submissionRegistrations)
+      .where(eq(submissionRegistrations.submissionId, submissionId));
+    return row;
+  }
+
+  async saveRegistration(
+    tx: Tx,
+    submissionId: string,
+    values: RegistrationValues,
+    updatedBy: string,
+  ): Promise<void> {
+    const row = { ...values, updatedBy, updatedAt: new Date() };
+    await tx
+      .insert(submissionRegistrations)
+      .values({ submissionId, ...row })
+      .onConflictDoUpdate({
+        target: submissionRegistrations.submissionId,
+        set: row,
+      });
+  }
+
   async nextPaperNo(tx: Tx, conferenceId: string): Promise<number> {
     const [row] = await tx
       .update(conferences)
@@ -256,7 +290,7 @@ export class SubmissionsRepository {
       .where(where)
       .orderBy(asc(submissions.conferenceId), asc(submissions.paperNo));
     const ids = rows.map((r) => r.id);
-    const [authors, files] = await Promise.all([
+    const [authors, files, registrations] = await Promise.all([
       ids.length === 0
         ? []
         : executor
@@ -265,11 +299,19 @@ export class SubmissionsRepository {
             .where(inArray(submissionAuthors.submissionId, ids))
             .orderBy(asc(submissionAuthors.position)),
       this.files(executor, ids),
+      ids.length === 0
+        ? []
+        : executor
+            .select()
+            .from(submissionRegistrations)
+            .where(inArray(submissionRegistrations.submissionId, ids)),
     ]);
     return rows.map((submission) => ({
       submission,
       authors: authors.filter((a) => a.submissionId === submission.id),
       files: files.filter((f) => f.submissionId === submission.id),
+      registration:
+        registrations.find((r) => r.submissionId === submission.id) ?? null,
     }));
   }
 

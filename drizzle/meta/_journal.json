@@ -134,6 +134,13 @@
       "when": 1795435780935,
       "tag": "0018_profile_verifications",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795523267541,
+      "tag": "0019_paper-registration",
+      "breakpoints": true
     }
   ]
 }

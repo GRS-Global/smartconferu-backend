@@ -81,6 +81,19 @@ export const decisionOutcome = pgEnum('decision_outcome', [
   'reject',
 ]);
 
+/** A paper's conference fee, as the chair records it (accepted papers). */
+export const paymentStatus = pgEnum('payment_status', [
+  'not_paid',
+  'paid',
+  'waived',
+]);
+
+/** How a paper is presented at the conference. */
+export const attendanceMode = pgEnum('attendance_mode', [
+  'physical',
+  'virtual',
+]);
+
 export const fileKind = pgEnum('file_kind', [
   'paper',
   'revision',
