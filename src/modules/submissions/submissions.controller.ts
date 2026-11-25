@@ -46,6 +46,7 @@ import {
   EmailsQueuedResponse,
   RecordDecisionDto,
   ResendOnBehalfDto,
+  SaveRegistrationDto,
   ScreeningNoticeDto,
   ScreeningRecordDto,
   SubmissionResponse,
@@ -57,6 +58,7 @@ import {
   ScreeningSettingsResponse,
   UpdateScreeningSettingsDto,
 } from './dto/screening.dto.js';
+import { RegistrationService } from './registration.service.js';
 import { ScreeningService } from './screening.service.js';
 import type { AutoCheck } from './screening/auto-check.js';
 import {
@@ -209,6 +211,7 @@ export class SubmissionsController {
     private readonly submissions: SubmissionsService,
     private readonly screening: ScreeningService,
     private readonly files: SubmissionFilesService,
+    private readonly registration: RegistrationService,
   ) {}
 
   @Post(':submissionId/files')
@@ -481,5 +484,20 @@ export class SubmissionsController {
     @Client() client: ClientInfo,
   ): Promise<SubmissionResponse> {
     return this.screening.recordDecision(user, submissionId, dto, client);
+  }
+
+  @Put(':submissionId/registration')
+  @ApiOperation({
+    summary:
+      'Record payment and attendance of an accepted paper (chairs). No email is sent.',
+  })
+  @ApiOkResponse({ type: SubmissionResponse })
+  saveRegistration(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+    @Body() dto: SaveRegistrationDto,
+    @Client() client: ClientInfo,
+  ): Promise<SubmissionResponse> {
+    return this.registration.save(user, submissionId, dto, client);
   }
 }

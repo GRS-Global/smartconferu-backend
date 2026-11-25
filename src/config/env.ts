@@ -97,8 +97,18 @@ const envSchema = z.object({
   /** `log` writes emails to the log instead of sending them (development and tests). */
   EMAIL_TRANSPORT: z.enum(['resend', 'log']).default('log'),
   RESEND_API_KEY: z.string().optional(),
-  /** e.g. "Smartconferu <no-reply@smartconferu.com>" */
-  EMAIL_FROM: z.string().default('Smartconferu <no-reply@localhost>'),
+  /**
+   * "Name <address>" or a bare address, e.g. "Smartconferu <no-reply@smartconferu.com>". Checked
+   * here because the email provider refuses any other shape (every email would fail).
+   */
+  EMAIL_FROM: z
+    .string()
+    .trim()
+    .regex(
+      /^(?:[^<>@\s][^<>@]*\s)?<[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+>$|^[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+$/,
+      'must be "Name <address@domain>" or "address@domain" (put the address in < > when there is a name)',
+    )
+    .default('Smartconferu <no-reply@localhost.test>'),
   /**
    * Public URL of the logo shown at the top of emails. Empty: the app's own /smartconferu-lockup.png when
    * APP_URL is a public address; on localhost / a private address the name is written out instead (a mail

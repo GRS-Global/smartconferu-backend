@@ -73,6 +73,30 @@ describe('validateEnv', () => {
     ).toThrow(/RESEND_API_KEY: is required/);
   });
 
+  it('accepts only a sender the email provider takes', () => {
+    for (const ok of [
+      'Smartconferu <no-reply@gr-conferences.com>',
+      'GR Conferences Team <hello@mail.example.org>',
+      'no-reply@example.com',
+      '  Smartconferu <no-reply@example.com>  ',
+    ]) {
+      expect(validateEnv({ ...minimal, EMAIL_FROM: ok }).EMAIL_FROM).toBe(
+        ok.trim(),
+      );
+    }
+    // A name without < > around the address is what Resend refuses with a 422 on every email.
+    for (const bad of [
+      'Smartconferu no-reply@gr-conferences.com',
+      'Smartconferu',
+      'Smartconferu <no-reply>',
+      '<no-reply@example.com',
+    ]) {
+      expect(() => validateEnv({ ...minimal, EMAIL_FROM: bad })).toThrow(
+        /EMAIL_FROM: must be "Name <address@domain>"/,
+      );
+    }
+  });
+
   it('keeps files in a local folder unless S3 storage is set up in full', () => {
     expect(
       validateEnv({ ...minimal, S3_ENDPOINT: '', S3_BUCKET: '' }),
