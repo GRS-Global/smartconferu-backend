@@ -6,13 +6,18 @@ import type { Env } from '../../config/env.js';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
-import { conferences, submissions } from '../../core/database/schema/index.js';
+import {
+  cfps,
+  conferences,
+  submissions,
+} from '../../core/database/schema/index.js';
 import { AppException } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import * as rules from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
 import { FileStorage } from '../../core/storage/file-storage.js';
 import { storagePaths } from '../../core/storage/storage-paths.js';
+import { CFP_LOCKED_MESSAGE } from '../conferences/cfp-lock.js';
 import type { FilePurpose, UploadedFileResponse } from './dto/files.dto.js';
 
 export interface UploadedFile {
@@ -127,6 +132,16 @@ export class FilesService {
           'Only a chair of this conference can upload this.',
         );
       }
+      // The logo is on the Call for Papers: it stays as sent while the Super Admin reviews it.
+      if (purpose === 'conference_logo') {
+        const [cfp] = await this.database.db
+          .select({ status: cfps.status })
+          .from(cfps)
+          .where(eq(cfps.conferenceId, conferenceId));
+        if (cfp?.status === 'in_review') {
+          throw AppException.businessRule(CFP_LOCKED_MESSAGE);
+        }
+      }
     }
     // A plagiarism report is kept with its paper.
     if (purpose === 'screening_report') {
@@ -221,6 +236,53 @@ export class FilesService {
       contentType: KINDS[kind].mime,
       sizeBytes: file.size,
     };
+  }
+
+  /**
+   * Removes a conference's logo (chairs): the conference shows its initials again and the file is
+   * deleted. Like an upload, it waits while the Call for Papers is with the Super Admin.
+   */
+  async removeConferenceLogo(
+    user: AuthUser,
+    conferenceId: string,
+    client: ClientInfo,
+  ): Promise<void> {
+    const access = await this.access.requireConference(user, conferenceId);
+    if (!rules.canManageConference(access)) {
+      throw AppException.forbidden(
+        'Only a chair of this conference can remove its logo.',
+      );
+    }
+    const db = this.database.db;
+    const [cfp] = await db
+      .select({ status: cfps.status })
+      .from(cfps)
+      .where(eq(cfps.conferenceId, conferenceId));
+    if (cfp?.status === 'in_review') {
+      throw AppException.businessRule(CFP_LOCKED_MESSAGE);
+    }
+    const [before] = await db
+      .select({ logoPath: conferences.logoPath })
+      .from(conferences)
+      .where(eq(conferences.id, conferenceId));
+    if (!before?.logoPath) {
+      return;
+    }
+    await db
+      .update(conferences)
+      .set({ logoPath: null })
+      .where(eq(conferences.id, conferenceId));
+    if (PATH.test(before.logoPath)) {
+      await this.storage.delete(before.logoPath);
+    }
+    await this.audit.record({
+      action: 'file.deleted',
+      actorId: user.id,
+      entityType: 'conference',
+      entityId: conferenceId,
+      client,
+      data: { purpose: 'conference_logo', path: before.logoPath },
+    });
   }
 
   /** Reads a file by its storage path. `viewer` is absent for the public route (photos, logos and review-instructions PDFs only). */

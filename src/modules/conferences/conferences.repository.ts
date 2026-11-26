@@ -10,10 +10,12 @@ import {
   isNull,
   like,
   ne,
+  notInArray,
   or,
   sql,
 } from 'drizzle-orm';
 import type { Executor } from '../../core/database/database.types.js';
+import { DECISION_TEMPLATE_KEYS } from './decision-emails.js';
 import {
   cfps,
   conferenceDeletionRequests,
@@ -315,7 +317,9 @@ export class ConferencesRepository {
             updatedBy: sql<string | null>`null::uuid`.as('updated_by'),
             updatedAt: sql<Date>`now()`.as('updated_at'),
           })
-          .from(emailTemplates),
+          .from(emailTemplates)
+          // The decision emails belong to the platform; a conference doesn't get a copy.
+          .where(notInArray(emailTemplates.key, [...DECISION_TEMPLATE_KEYS])),
       )
       .onConflictDoNothing();
   }

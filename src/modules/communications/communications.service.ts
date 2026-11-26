@@ -44,6 +44,7 @@ import {
   type UpdateConferenceTemplateDto,
   type UpdatePlatformTemplateDto,
 } from './dto/communications.dto.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 const MAX_CUSTOM_RECIPIENTS = 2000;
 const TOLD_ACCEPTED = ['accept', 'registered'];
@@ -551,7 +552,7 @@ export class CommunicationsService {
                 ? details.presentationType
                 : '',
             submission_link: pid
-              ? this.recipients.link(`/submissions/${pid}/author`)
+              ? this.recipients.link(appPaths.authorPaper(conference.slug, pid))
               : this.recipients.link('/'),
           };
           return {

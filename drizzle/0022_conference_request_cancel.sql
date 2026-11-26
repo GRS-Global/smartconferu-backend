@@ -1,0 +1,1 @@
+ALTER TYPE "public"."conference_status" ADD VALUE 'cancelled';

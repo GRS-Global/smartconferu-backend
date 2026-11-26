@@ -93,7 +93,11 @@ export class MembersService {
   ): Promise<InviteResult> {
     return this.database.transaction(async (tx) => {
       const access = await this.requireChair(tx, user, conferenceId);
-      if (access.status === 'rejected' || access.status === 'deleted') {
+      if (
+        access.status === 'rejected' ||
+        access.status === 'deleted' ||
+        access.status === 'cancelled'
+      ) {
         throw AppException.businessRule(
           'This conference was declined or deleted: no one can be invited.',
         );

@@ -129,7 +129,11 @@ export class LicenseService {
   ): Promise<LicenseRequestResponse> {
     return this.database.transaction(async (tx) => {
       const access = await this.requireChair(tx, user, conferenceId);
-      if (access.status === 'rejected' || access.status === 'deleted') {
+      if (
+        access.status === 'rejected' ||
+        access.status === 'deleted' ||
+        access.status === 'cancelled'
+      ) {
         throw AppException.businessRule(
           'This conference was declined or deleted.',
         );
@@ -231,7 +235,11 @@ export class LicenseService {
   ): Promise<void> {
     await this.database.transaction(async (tx) => {
       const conference = await this.conference(tx, conferenceId);
-      if (conference.status === 'deleted' || conference.status === 'rejected') {
+      if (
+        conference.status === 'deleted' ||
+        conference.status === 'rejected' ||
+        conference.status === 'cancelled'
+      ) {
         throw AppException.businessRule(
           'This conference was declined or deleted.',
         );

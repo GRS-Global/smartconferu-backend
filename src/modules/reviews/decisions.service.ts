@@ -21,6 +21,7 @@ import type {
 import { ReviewEmailsService } from './review-emails.service.js';
 import { toDecisionType } from './review.mapper.js';
 import { ReviewsRepository } from './reviews.repository.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 const DEFAULT_COLOR = '#64748B';
 
@@ -122,7 +123,7 @@ export class DecisionsService {
           body: note,
           conferenceId: submission.conferenceId,
           submissionId,
-          link: `/submissions/${pid}/author`,
+          link: appPaths.authorPaper(info.slug, pid),
         },
       );
 

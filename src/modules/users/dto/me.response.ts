@@ -84,7 +84,14 @@ export class MyConferenceResponse {
   title: string;
 
   @ApiProperty({
-    enum: ['pending_approval', 'active', 'rejected', 'archived', 'deleted'],
+    enum: [
+      'pending_approval',
+      'active',
+      'rejected',
+      'archived',
+      'deleted',
+      'cancelled',
+    ],
   })
   conferenceStatus: string;
 

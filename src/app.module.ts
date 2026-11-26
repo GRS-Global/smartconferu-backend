@@ -32,6 +32,7 @@ import { JobsModule } from './modules/jobs/jobs.module.js';
 import { BellModule } from './modules/notifications/notifications.module.js';
 import { ReviewsModule } from './modules/reviews/reviews.module.js';
 import { SubmissionsModule } from './modules/submissions/submissions.module.js';
+import { CertificatesModule } from './modules/certificates/certificates.module.js';
 import { FilesModule } from './modules/files/files.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
@@ -114,6 +115,7 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
     AdminModule,
     MasterDataModule,
     ProfileVerificationModule,
+    CertificatesModule,
   ],
   controllers: [HealthController],
   providers: [

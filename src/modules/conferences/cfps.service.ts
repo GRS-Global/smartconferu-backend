@@ -70,9 +70,20 @@ export class CfpsService {
   ): Promise<CfpResponse> {
     return this.database.transaction(async (tx) => {
       const access = await this.requireEditor(tx, user, conferenceId);
-      if (access.status === 'rejected' || access.status === 'deleted') {
+      if (
+        access.status === 'rejected' ||
+        access.status === 'deleted' ||
+        access.status === 'cancelled'
+      ) {
         throw AppException.businessRule(
           'This conference was declined or deleted and can no longer be changed.',
+        );
+      }
+      // What was sent for approval is what the Super Admin reviews: no changes until they decide.
+      const current = await this.conferences.findCfp(tx, conferenceId);
+      if (current.status === 'in_review') {
+        throw AppException.businessRule(
+          "This Call for Papers is waiting for the Super Admin's approval and can't be changed until it is decided.",
         );
       }
       const values: Partial<CfpRow> = {};

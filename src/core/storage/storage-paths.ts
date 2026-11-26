@@ -8,6 +8,9 @@
  * conferences/<conference>/
  *   branding/logo-<id>.<ext>
  *   documents/review-instructions-<id>.pdf
+ *   certificates/
+ *     signatures/<id>.<ext>      the signature library
+ *     pictures/<id>.<ext>        the picture library (logos, backgrounds, graphics)
  *   papers/<submission>/
  *     versions/v<n>-[camera-ready-]<tag>-<file name>   every version is kept
  *     plagiarism/report-<id>.pdf
@@ -23,6 +26,11 @@ export const storagePaths = {
     `conferences/${conferenceId}/branding/logo-${id}.${ext}`,
   reviewInstructions: (conferenceId: string, id: string) =>
     `conferences/${conferenceId}/documents/review-instructions-${id}.pdf`,
+
+  certificateSignature: (conferenceId: string, id: string, ext: string) =>
+    `conferences/${conferenceId}/certificates/signatures/${id}.${ext}`,
+  certificatePicture: (conferenceId: string, id: string, ext: string) =>
+    `conferences/${conferenceId}/certificates/pictures/${id}.${ext}`,
 
   paperFolder: (conferenceId: string, submissionId: string) =>
     `conferences/${conferenceId}/papers/${submissionId}/`,

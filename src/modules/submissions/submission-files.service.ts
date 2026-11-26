@@ -19,6 +19,7 @@ import { type AutoCheck, parseAutoCheck } from './screening/auto-check.js';
 import { AutoInitialCheckService } from './screening/auto-initial-check.service.js';
 import { paperId } from './submission.mapper.js';
 import { SubmissionsRepository } from './submissions.repository.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 export interface UploadedFile {
   originalname: string;
@@ -230,7 +231,7 @@ export class SubmissionFilesService {
               body: submission.title,
               conferenceId: submission.conferenceId,
               submissionId,
-              link: `/submissions/${pid}/chair`,
+              link: appPaths.chairPaper(info.slug, pid),
             });
           }
           if (auto) {

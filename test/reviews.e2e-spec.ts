@@ -70,7 +70,7 @@ describe('Peer review and decisions', () => {
     (
       await t.db.query<{ kind: string }>(
         `select kind from notifications where user_id = $1
-          and kind not in ('member_invited', 'invitation', 'new_submission', 'conference_decision', 'invitation_answer')
+          and kind not in ('member_invited', 'invitation', 'new_submission', 'conference_decision', 'cfp_decision', 'invitation_answer')
           order by created_at`,
         [userId],
       )

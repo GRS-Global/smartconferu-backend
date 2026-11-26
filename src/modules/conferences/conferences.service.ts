@@ -1,3 +1,4 @@
+import { CFP_LOCKED_MESSAGE, CFP_SHOWN_FIELDS, sameValue } from './cfp-lock.js';
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
@@ -65,6 +66,7 @@ export class ConferencesService {
     client: ClientInfo,
   ): Promise<ConferenceResponse> {
     this.assertDateOrder(dto.startDate, dto.endDate);
+    this.assertNotInPast(dto.startDate, dto.endDate);
     const id = await this.database.transaction(async (tx) => {
       const slug = await this.freeSlug(tx, dto.acronym);
       const conference = await this.conferences.create(tx, {
@@ -108,7 +110,7 @@ export class ConferencesService {
     return this.get(user, id);
   }
 
-  /** The user's live and archived conferences, and their own requests still waiting or declined. */
+  /** The user's live and archived conferences, and every conference request they made (any status). */
   async listMine(user: AuthUser): Promise<MyConferencesResponse> {
     const db = this.database.db;
     const [rows, superAdmin] = await Promise.all([
@@ -135,11 +137,58 @@ export class ConferencesService {
         if (myRoles.length > 0) {
           conferences.push(toConference(row, view));
         }
-      } else if (row.createdBy === user.id) {
+      }
+      // Every request the person made, whatever became of it (waiting, approved, declined, cancelled).
+      if (row.createdBy === user.id) {
         requests.push(toConference(row, view));
       }
     }
     return { conferences, requests };
+  }
+
+  /**
+   * The person who asked takes the request back while it still waits for a Super Admin. It leaves
+   * the Super Admin queue and the person's My Requests; the row stays (status `cancelled`, the
+   * reason in `adminNote`) for the audit trail. A decided request can't be cancelled.
+   */
+  async cancelRequest(
+    user: AuthUser,
+    conferenceId: string,
+    reason: string | null | undefined,
+    client: ClientInfo,
+  ): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      const row = await this.conferences.findById(tx, conferenceId);
+      if (!row || row.createdBy !== user.id) {
+        throw AppException.notFound('The conference request');
+      }
+      const moved = await this.conferences.moveStatus(
+        tx,
+        conferenceId,
+        'pending_approval',
+        { status: 'cancelled', adminNote: reason?.trim() || null },
+      );
+      if (!moved) {
+        throw AppException.businessRule(
+          'Only a request that is still waiting for approval can be cancelled.',
+        );
+      }
+      await this.notifications.notifySuperAdmins(tx, {
+        kind: 'conference_request_cancelled',
+        title: 'Conference request cancelled',
+        body: reason?.trim()
+          ? `${row.acronym} — ${reason.trim()}`
+          : `${row.acronym} — ${row.title}`,
+        conferenceId,
+      });
+      await this.record(
+        tx,
+        'conference.request_cancelled',
+        user,
+        conferenceId,
+        client,
+      );
+    });
   }
 
   async get(user: AuthUser, conferenceId: string): Promise<ConferenceResponse> {
@@ -189,6 +238,7 @@ export class ConferencesService {
       if (Object.keys(values).length === 0) {
         return;
       }
+      await this.assertCfpFieldsOpen(tx, conferenceId, current, values);
       await this.conferences.update(tx, conferenceId, values);
       await this.audit.record(
         {
@@ -203,6 +253,35 @@ export class ConferencesService {
       );
     });
     return this.get(user, conferenceId);
+  }
+
+  /** A CFP waiting for the Super Admin keeps what it shows: refuses a change to those fields (sending them unchanged is fine). */
+  private async assertCfpFieldsOpen(
+    tx: Parameters<ConferencesRepository['findCfp']>[0],
+    conferenceId: string,
+    current: Record<string, unknown>,
+    values: Record<string, unknown>,
+  ): Promise<void> {
+    const cfp = await this.conferences.findCfp(tx, conferenceId);
+    if (cfp.status !== 'in_review') {
+      return;
+    }
+    const changed = CFP_SHOWN_FIELDS.filter(
+      (key) => key in values && !sameValue(values[key], current[key]),
+    );
+    const detailsOf = (v: unknown) => (v ?? {}) as Record<string, unknown>;
+    if (
+      values.details !== undefined &&
+      !sameValue(
+        detailsOf(values.details).abstractDeadline,
+        detailsOf(current.details).abstractDeadline,
+      )
+    ) {
+      changed.push('abstractDeadline' as never);
+    }
+    if (changed.length > 0) {
+      throw AppException.businessRule(CFP_LOCKED_MESSAGE);
+    }
   }
 
   /** Replaces the given top-level settings keys; null removes a key. */
@@ -489,10 +568,39 @@ export class ConferencesService {
 
   /** A declined or deleted conference can't be changed (approval can't be bypassed by edits). */
   private assertEditable(access: ConferenceAccess): void {
-    if (access.status === 'rejected' || access.status === 'deleted') {
+    if (
+      access.status === 'rejected' ||
+      access.status === 'deleted' ||
+      access.status === 'cancelled'
+    ) {
       throw AppException.businessRule(
         'This conference was declined or deleted and can no longer be changed.',
       );
+    }
+  }
+
+  /**
+   * A new conference can't be for days that are over. The person's own "today" can be a day ahead of
+   * or behind UTC, so yesterday (UTC) still counts as today.
+   */
+  private assertNotInPast(
+    start: string | null | undefined,
+    end: string | null | undefined,
+  ): void {
+    const earliest = new Date(Date.now() - 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const past = (day: string | null | undefined) =>
+      Boolean(day) && day!.slice(0, 10) < earliest;
+    if (past(start) || past(end)) {
+      throw AppException.validation('The conference dates are in the past.', [
+        ...(past(start)
+          ? [{ field: 'startDate', errors: ['must be today or a later date'] }]
+          : []),
+        ...(past(end)
+          ? [{ field: 'endDate', errors: ['must be today or a later date'] }]
+          : []),
+      ]);
     }
   }
 

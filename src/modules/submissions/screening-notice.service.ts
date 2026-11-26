@@ -15,6 +15,7 @@ import {
   SubmissionsRepository,
 } from './submissions.repository.js';
 import { SubmissionsService } from './submissions.service.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 export interface ScreeningNotice {
   stage: 'correction' | 'revision' | 'reject';
@@ -71,7 +72,7 @@ export class ScreeningNoticeService {
         body: screeningReasons(record, notice.stage).text.slice(0, 300),
         conferenceId: info.id,
         submissionId: submission.id,
-        link: `/submissions/${pid}/author`,
+        link: appPaths.authorPaper(info.slug, pid),
       },
     );
     return this.emails.enqueue(

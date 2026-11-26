@@ -41,6 +41,7 @@ import {
   ConferenceResponse,
   CreateConferenceDto,
   MyConferencesResponse,
+  CancelRequestDto,
   ReasonDto,
   SetupProgressDto,
   UpdateConferenceDto,
@@ -149,6 +150,27 @@ export class ConferencesController {
     @Body() dto: SetupProgressDto,
   ): Promise<void> {
     return this.conferences.saveSetupProgress(user, conferenceId, dto.progress);
+  }
+
+  @Post(':conferenceId/cancel-request')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Take back your own conference request while it waits for approval',
+  })
+  @ApiNoContentResponse()
+  cancelRequest(
+    @CurrentUser() user: AuthUser,
+    @ConferenceId() conferenceId: string,
+    @Body() dto: CancelRequestDto,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    return this.conferences.cancelRequest(
+      user,
+      conferenceId,
+      dto.reason,
+      client,
+    );
   }
 
   @Post(':conferenceId/archive')

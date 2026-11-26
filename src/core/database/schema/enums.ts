@@ -32,6 +32,7 @@ export const conferenceStatus = pgEnum('conference_status', [
   'rejected',
   'archived',
   'deleted',
+  'cancelled',
 ]);
 
 export const cfpStatus = pgEnum('cfp_status', [

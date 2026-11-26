@@ -460,7 +460,7 @@ describe('Conferences, CFP and team', () => {
         adminNote: 'Please add the submission dates.',
       });
       const told = await t.db.query(
-        "select title, body from notifications where kind = 'conference_decision' and title like 'Call for Papers%' and user_id = $1",
+        "select title, body from notifications where kind = 'cfp_decision' and title like 'Call for Papers%' and user_id = $1",
         [chair.id],
       );
       expect(told.rows).toEqual([

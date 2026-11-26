@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   Header,
   HttpCode,
@@ -18,6 +19,7 @@ import {
   ApiBody,
   ApiConsumes,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOperation,
   ApiProduces,
   ApiQuery,
@@ -95,6 +97,32 @@ export class FilesController {
       client,
       submissionId,
     );
+  }
+
+  @Delete('conference-logo')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiQuery({
+    name: 'conferenceId',
+    type: String,
+    description: 'UUID or slug.',
+  })
+  @ApiOperation({
+    summary:
+      "Remove the conference's logo (chairs); refused while its Call for Papers waits for the Super Admin",
+  })
+  @ApiNoContentResponse()
+  removeConferenceLogo(
+    @CurrentUser() user: AuthUser,
+    @Query('conferenceId', ConferenceRefPipe) conferenceId: string | undefined,
+    @Client() client: ClientInfo,
+  ): Promise<void> {
+    if (!conferenceId) {
+      throw AppException.validation('This needs a conference.', [
+        { field: 'conferenceId', errors: ['conferenceId is required'] },
+      ]);
+    }
+    return this.files.removeConferenceLogo(user, conferenceId, client);
   }
 
   /** Profile photos and conference logos are shown in <img> tags and on public pages, so they can be read without a token. */

@@ -58,6 +58,19 @@ export function renderTemplate(
   });
 }
 
+/** Plain text typed in a box → HTML paragraphs (a blank line starts a new one). `{{placeholders}}` are kept. */
+export function textToHtml(text: string): string {
+  return String(text || '')
+    .trim()
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map(
+      (paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`,
+    )
+    .join('');
+}
+
 /** The plain-text version of an email body. */
 export function htmlToText(html: string): string {
   return String(html || '')

@@ -1,0 +1,5 @@
+-- "New submission alert" (to the chairs) names the paper by its ID and its number. Conference copies nobody edited follow the new default.
+UPDATE "conference_email_templates" SET "body" = '<p>Hi {{first_name}},</p><p>A new paper was submitted to {{conference_name}}.</p><p>Paper ID: {{submission_id}}<br>Paper number: {{paper_number}}<br>Title: {{paper_title}}<br>Track: {{track}}<br>Submitted by: {{submitter_name}}</p><p>Open the paper: {{submission_link}}</p><p>Best regards,<br>The {{conference_name}} Team</p>', "updated_at" = now()
+WHERE "key" = 'newSubmissionAlert' AND "body" = (SELECT "body" FROM "email_templates" WHERE "key" = 'newSubmissionAlert');--> statement-breakpoint
+UPDATE "email_templates" SET "body" = '<p>Hi {{first_name}},</p><p>A new paper was submitted to {{conference_name}}.</p><p>Paper ID: {{submission_id}}<br>Paper number: {{paper_number}}<br>Title: {{paper_title}}<br>Track: {{track}}<br>Submitted by: {{submitter_name}}</p><p>Open the paper: {{submission_link}}</p><p>Best regards,<br>The {{conference_name}} Team</p>', "updated_at" = now()
+WHERE "key" = 'newSubmissionAlert';

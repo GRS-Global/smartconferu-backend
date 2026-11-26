@@ -25,6 +25,7 @@
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "db:migrate": "node dist/migrate.js",
+    "db:migrate:env": "nest build && node --env-file=.env dist/migrate.js",
     "secrets:generate": "node scripts/generate-secrets.ts"
   },
   "dependencies": {

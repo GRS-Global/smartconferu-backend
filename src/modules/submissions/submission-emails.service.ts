@@ -19,6 +19,7 @@ import {
 } from '../../core/email/email-recipients.service.js';
 import { paperId } from './submission.mapper.js';
 import type { AuthorRow, SubmissionRow } from './submissions.repository.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 /** Everything the paper emails are built from. */
 export interface PaperContext {
@@ -112,6 +113,7 @@ export class SubmissionEmailsService {
     const details = ctx.submission.details as Record<string, unknown>;
     return {
       submission_id: this.paperId(ctx),
+      paper_number: String(ctx.submission.paperNo),
       paper_title: ctx.submission.title,
       track:
         typeof details.track === 'string' ? details.track : 'General Track',
@@ -167,7 +169,9 @@ export class SubmissionEmailsService {
         values: {
           ...this.common(ctx),
           first_name: firstName(c.name, c.email),
-          submission_link: this.link(`/submissions/${pid}/chair`),
+          submission_link: this.link(
+            appPaths.chairPaper(ctx.conference.slug, pid),
+          ),
         },
       }),
     );
@@ -193,7 +197,9 @@ export class SubmissionEmailsService {
         values: {
           ...this.common(ctx),
           first_name: firstName(a.name, a.email),
-          submission_link: this.link(`/submissions/${pid}/author`),
+          submission_link: this.link(
+            appPaths.authorPaper(ctx.conference.slug, pid),
+          ),
         },
       }));
     return [
@@ -232,7 +238,9 @@ export class SubmissionEmailsService {
         chair_name: ctx.actor.name,
         first_name: firstName(a.name, a.email),
         submission_link: this.link(
-          a.hasAccount ? `/submissions/${pid}/author` : '/register',
+          a.hasAccount
+            ? appPaths.authorPaper(ctx.conference.slug, pid)
+            : '/register',
         ),
       },
     });
@@ -309,7 +317,9 @@ export class SubmissionEmailsService {
     to: readonly { email: string; name: string }[],
     message: { subject: string; body: string },
   ): WrittenEmail[] {
-    const link = this.link(`/submissions/${this.paperId(ctx)}/author`);
+    const link = this.link(
+      appPaths.authorPaper(ctx.conference.slug, this.paperId(ctx)),
+    );
     return to.map((a): WrittenEmail => {
       const values = {
         ...this.common(ctx),
@@ -337,7 +347,9 @@ export class SubmissionEmailsService {
     ask: { issue: string; fixBy: string },
   ): Promise<OutgoingEmail[]> {
     const { updates } = await this.authorRecipients(executor, ctx);
-    const link = this.link(`/submissions/${this.paperId(ctx)}/author`);
+    const link = this.link(
+      appPaths.authorPaper(ctx.conference.slug, this.paperId(ctx)),
+    );
     return updates.map((a): OutgoingEmail => ({
       ...this.base(ctx),
       key: 'fixRequested',
@@ -412,7 +424,7 @@ export class SubmissionEmailsService {
     const values = {
       submission_id: pid,
       paper_title: ctx.submission.title,
-      upload_link: this.link(`/submissions/${pid}/author`),
+      upload_link: this.link(appPaths.authorPaper(ctx.conference.slug, pid)),
       correction_reasons: reasons.html,
       correction_deadline:
         reasons.deadline || 'the date on your submission page',

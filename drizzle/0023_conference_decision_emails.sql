@@ -1,0 +1,5 @@
+-- The two emails a Super Admin's decision on a conference request sends. They are platform-only: a conference never gets a copy.
+INSERT INTO "email_templates" ("key", "module", "role", "label", "send_type", "trigger_text", "recipients", "subject", "body") VALUES
+('conferenceApproved', 'setup', 'chair', 'Conference approved', 'auto', 'Super Admin approves a conference request', 'Conference Chair (who asked)', '{{conference_acronym}} is approved', '<p>Dear {{first_name}},</p><p>Your request to host {{conference_acronym}} ({{conference_name}}) on Smartconferu has been approved. Open your conference to add the call for papers, tracks, deadlines and reviewers:</p><p>{{dashboard_link}}</p>'),
+('conferenceDeclined', 'setup', 'chair', 'Conference request declined', 'auto', 'Super Admin declines a conference request', 'Conference Chair (who asked)', 'Your request for {{conference_acronym}}', '<p>Dear {{first_name}},</p><p>Thank you for your interest in hosting {{conference_acronym}} on Smartconferu. We weren''t able to approve the request:</p><p>“{{reason}}”</p><p>You can send a new request any time from My Conferences.</p>')
+ON CONFLICT ("key") DO NOTHING;

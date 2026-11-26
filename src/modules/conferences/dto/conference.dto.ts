@@ -234,10 +234,47 @@ export class ReasonDto {
   reason: string;
 }
 
+export class CancelRequestDto {
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2000)
+  reason?: string;
+}
+
 export class DecisionDto {
   @ApiProperty({ description: 'true approves, false declines.' })
   @IsBoolean()
   approve: boolean;
+
+  @ApiPropertyOptional({
+    maxLength: 300,
+    description:
+      'The email subject as edited in the popup (placeholders allowed).',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(300)
+  emailSubject?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 10000,
+    description:
+      'The email body as plain text (a blank line starts a paragraph; {{placeholders}} allowed).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10000)
+  emailBody?: string;
+
+  @ApiPropertyOptional({
+    description: 'Keep the edited text as the default for the next decisions.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  saveEmailAsDefault?: boolean;
 
   @ApiPropertyOptional({
     maxLength: 2000,
@@ -362,7 +399,7 @@ export class MyConferencesResponse {
   @ApiProperty({
     type: [ConferenceResponse],
     description:
-      'Conferences the user asked for that are waiting for approval or were declined.',
+      'Every conference the user asked for, whatever its status: waiting, approved, declined or cancelled.',
   })
   requests: ConferenceResponse[];
 }
@@ -408,6 +445,24 @@ export class AdminConferenceResponse extends ConferenceResponse {
       'Suspended by a Super Admin: read-only for everyone else until reactivated.',
   })
   suspended: boolean;
+}
+
+/** A conference in CFP Page Review: also the CFP's own page address and when it was sent for approval. */
+export class AdminCfpResponse extends AdminConferenceResponse {
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'The page the chair chose: smartconferu.com/cfp/<cfpPage>.',
+  })
+  cfpPage: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: 'When the CFP was (last) sent for approval.',
+  })
+  cfpSubmittedAt: string | null;
 }
 
 export class SuspendDto {

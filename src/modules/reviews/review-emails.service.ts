@@ -21,6 +21,7 @@ import {
 import { paperId } from '../submissions/submission.mapper.js';
 import { averageScore } from './review.mapper.js';
 import type { ReviewRow } from './reviews.repository.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 /** The template the authors get for each decision told to them. */
 const DECISION_TEMPLATES: Partial<Record<DecisionOutcome, string>> = {
@@ -157,7 +158,7 @@ export class ReviewEmailsService {
                 ? `${Math.min(...scores)} – ${Math.max(...scores)}`
                 : '—',
             submission_link: this.recipients.link(
-              `/submissions/${this.pid(ctx)}/chair/review`,
+              appPaths.chairPaper(ctx.conference.slug, this.pid(ctx), 'review'),
             ),
           },
         });
@@ -174,7 +175,7 @@ export class ReviewEmailsService {
     ask: { date: string; reason: string | null; currentDue: string | null },
   ): WrittenEmail[] {
     const link = this.recipients.link(
-      `/submissions/${this.pid(ctx)}/chair/review`,
+      appPaths.chairPaper(ctx.conference.slug, this.pid(ctx), 'review'),
     );
     return chairs.map((chair) => ({
       ...this.base(ctx),
@@ -352,7 +353,9 @@ export class ReviewEmailsService {
       revision_deadline: 'the date shown on your submission page',
       final_decision_date:
         emailDate(sent.notificationDate) || 'the final decision date',
-      upload_link: this.recipients.link(`/submissions/${this.pid(ctx)}/author`),
+      upload_link: this.recipients.link(
+        appPaths.authorPaper(ctx.conference.slug, this.pid(ctx)),
+      ),
     };
     const authors = (await this.paperEmails.authorUpdates(executor, ctx)).map(
       (a): TemplateEmail => ({

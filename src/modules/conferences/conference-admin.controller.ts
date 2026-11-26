@@ -27,6 +27,7 @@ import { SuperAdminOnly } from '../../core/rbac/super-admin.guard.js';
 import { ConferenceAdminService } from './conference-admin.service.js';
 import { LicenseService } from './license.service.js';
 import {
+  AdminCfpResponse,
   AdminConferenceResponse,
   ConferenceStatusQuery,
   AskInfoDto,
@@ -97,6 +98,18 @@ export class ConferenceAdminController {
     return this.admin.list(query.status);
   }
 
+  @Get('decision-emails')
+  @ApiOperation({
+    summary:
+      'The two decision emails (approved, declined) as plain text, and the logo they carry, for the decision popup',
+  })
+  @ApiOkResponse({
+    description: '{ approved, declined: { subject, body }, logoUrl }',
+  })
+  decisionEmails() {
+    return this.admin.decisionEmails();
+  }
+
   @Post('conferences/:conferenceId/decision')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Approve or decline a conference request' })
@@ -107,7 +120,18 @@ export class ConferenceAdminController {
     @Body() dto: DecisionDto,
     @Client() client: ClientInfo,
   ): Promise<void> {
-    return this.admin.decide(user, conferenceId, dto.approve, dto.note, client);
+    return this.admin.decide(
+      user,
+      conferenceId,
+      dto.approve,
+      dto.note,
+      client,
+      {
+        subject: dto.emailSubject,
+        body: dto.emailBody,
+        saveAsDefault: dto.saveEmailAsDefault,
+      },
+    );
   }
 
   @Post('conferences/:conferenceId/suspend')
@@ -167,8 +191,8 @@ export class ConferenceAdminController {
     summary:
       'Calls for Papers by state (default: the ones waiting for approval), with who asked for the conference',
   })
-  @ApiOkResponse({ type: [AdminConferenceResponse] })
-  listCfps(@Query() query: CfpStateQuery): Promise<AdminConferenceResponse[]> {
+  @ApiOkResponse({ type: [AdminCfpResponse] })
+  listCfps(@Query() query: CfpStateQuery): Promise<AdminCfpResponse[]> {
     return this.admin.listCfps(query.status ?? 'in_review');
   }
 

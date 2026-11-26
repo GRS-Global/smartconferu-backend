@@ -1,12 +1,22 @@
 import { Injectable } from '@nestjs/common';
 import { asc, eq, inArray } from 'drizzle-orm';
 import type { Executor } from '../../core/database/database.types.js';
-import { conferences, submissions } from '../../core/database/schema/index.js';
+import {
+  conferences,
+  emailTemplates,
+  submissions,
+} from '../../core/database/schema/index.js';
 import {
   emailDate,
   escapeHtml,
   firstName,
+  htmlToText,
+  renderTemplate,
 } from '../../core/email/email-render.js';
+import {
+  DECISION_FALLBACKS,
+  type DecisionTemplateKey,
+} from './decision-emails.js';
 import {
   type EmailConference,
   EmailQueueService,
@@ -18,6 +28,7 @@ import {
   type Person,
 } from '../../core/email/email-recipients.service.js';
 import { paperId } from '../submissions/submission.mapper.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 /** A conference, as the emails about it need it. */
 interface ConferenceFacts extends EmailConference {
@@ -133,7 +144,7 @@ export class ConferenceEmailsService {
     adminId: string,
   ): Promise<void> {
     const chairs = await this.recipients.chairs(executor, conference.id);
-    const cfp = this.recipients.link(`/cfp-manager/${conference.slug}`);
+    const cfp = this.recipients.link(appPaths.cfpManager(conference.slug));
     const acronym = escapeHtml(conference.acronym);
     const emails = chairs.map((chair): WrittenEmail => ({
       key: approved ? 'cfpApproved' : 'cfpDeclined',
@@ -158,37 +169,96 @@ export class ConferenceEmailsService {
     });
   }
 
-  /** A super admin approved or declined a request → the chair who asked. */
+  /** The platform's text for a decision email: the stored template, else the built-in one. */
+  private async decisionTemplate(executor: Executor, key: DecisionTemplateKey) {
+    const [row] = await executor
+      .select()
+      .from(emailTemplates)
+      .where(eq(emailTemplates.key, key));
+    const fallback = DECISION_FALLBACKS[key];
+    return {
+      label: row?.label ?? fallback.label,
+      subject: row?.subject ?? fallback.subject,
+      body: row?.body ?? fallback.body,
+    };
+  }
+
+  /** What the decision popup shows and edits: both emails as plain text, and the logo they carry. */
+  async decisionDefaults(executor: Executor) {
+    const one = async (key: DecisionTemplateKey) => {
+      const t = await this.decisionTemplate(executor, key);
+      return { subject: t.subject, body: htmlToText(t.body).trim() };
+    };
+    return {
+      approved: await one('conferenceApproved'),
+      declined: await one('conferenceDeclined'),
+      logoUrl: this.queue.logoUrl ?? null,
+    };
+  }
+
+  /** "Save as the default": the next decisions start from this text. */
+  async saveDecisionDefault(
+    executor: Executor,
+    approved: boolean,
+    text: { subject?: string; body?: string },
+    adminId: string,
+  ): Promise<void> {
+    const key: DecisionTemplateKey = approved
+      ? 'conferenceApproved'
+      : 'conferenceDeclined';
+    const current = await this.decisionTemplate(executor, key);
+    await executor
+      .update(emailTemplates)
+      .set({
+        subject: text.subject || current.subject,
+        body: text.body || current.body,
+        updatedBy: adminId,
+        updatedAt: new Date(),
+      })
+      .where(eq(emailTemplates.key, key));
+  }
+
+  /** A super admin decided a conference request → the chair who asked. `override` is the text typed in the popup (body as HTML). */
   async decided(
     executor: Executor,
     conference: ConferenceFacts & { createdBy: string },
     approved: boolean,
     adminId: string,
+    override?: { subject?: string; body?: string },
   ): Promise<void> {
     const chair = await this.one(executor, conference.createdBy);
     if (!chair) {
       return;
     }
-    const hi = `<p>Dear ${escapeHtml(firstName(chair.name, chair.email))},</p>`;
-    const dashboard = this.recipients.link(
-      `/conference/${conference.slug}/chair`,
+    const template = await this.decisionTemplate(
+      executor,
+      approved ? 'conferenceApproved' : 'conferenceDeclined',
     );
-    const acronym = escapeHtml(conference.acronym);
+    const values = {
+      first_name: firstName(chair.name, chair.email),
+      conference_name: conference.title,
+      conference_acronym: conference.acronym,
+      dashboard_link: this.recipients.link(
+        appPaths.chairDashboard(conference.slug),
+      ),
+      // The reason is written as HTML by the renderer (see HTML_VALUES), so it is escaped here.
+      reason: escapeHtml(conference.adminNote || 'No reason was given.'),
+    };
     await this.queue.enqueue(
       executor,
       'conference_decided',
       {
         key: approved ? 'conferenceApproved' : 'conferenceDeclined',
-        label: approved ? 'Conference approved' : 'Conference request declined',
+        label: template.label,
         recipientType: 'Chair',
         conference: approved ? this.conference(conference) : null,
         to: chair,
-        subject: approved
-          ? `${conference.acronym} is approved`
-          : `Your request for ${conference.acronym}`,
-        body: approved
-          ? `${hi}<p>Your request to host <b>${acronym}</b> (${escapeHtml(conference.title)}) on Smartconferu has been approved. Open your conference to add the call for papers, tracks, deadlines and reviewers:</p><p><a href="${escapeHtml(dashboard)}" style="color:#4F46E5">${escapeHtml(dashboard)}</a></p>`
-          : `${hi}<p>Thank you for your interest in hosting <b>${acronym}</b> on Smartconferu. We weren't able to approve the request${conference.adminNote ? `:</p><p>“${escapeHtml(conference.adminNote)}”</p>` : '.</p>'}<p>You can send a new request any time from My Conferences.</p>`,
+        subject: renderTemplate(override?.subject || template.subject, values, {
+          html: false,
+        }),
+        body: renderTemplate(override?.body || template.body, values, {
+          html: true,
+        }),
       },
       { sentBy: adminId },
     );
@@ -279,7 +349,7 @@ export class ConferenceEmailsService {
         values: {
           first_name: firstName(chair.name, chair.email),
           dashboard_link: this.recipients.link(
-            `/conference/${conference.slug}/chair`,
+            appPaths.chairDashboard(conference.slug),
           ),
         },
       },

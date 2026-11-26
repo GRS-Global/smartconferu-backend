@@ -74,7 +74,8 @@ interface Template {
  */
 @Injectable()
 export class EmailQueueService {
-  private readonly logoUrl: string | undefined;
+  /** Public URL of the logo the emails carry (undefined on a private address). */
+  readonly logoUrl: string | undefined;
 
   constructor(config: ConfigService<Env, true>) {
     this.logoUrl = emailLogoUrl(

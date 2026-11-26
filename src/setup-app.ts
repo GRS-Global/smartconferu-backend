@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import type { NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import type { Env } from './config/env.js';
@@ -21,7 +22,21 @@ export function setupApp(app: NestExpressApplication): void {
   // AWS load balancers sit in front of the app: trust one proxy hop for the client IP.
   app.set('trust proxy', 1);
   app.use(helmet());
+  // helmet marks every response "same-origin only", which stops the web app (another origin) from showing a picture in an <img>. The pictures anyone
+  // may read by their address (profile photos and conference logos, signature and certificate pictures) are meant to be shown by the web app, so only
+  // those routes say "cross-origin"; everything else keeps the strict default.
+  const PUBLIC_PICTURES =
+    /^\/api\/v1\/(?:files\/public|certificates\/(?:signature|asset)-image\/[^/]+)\/?$/;
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'GET' && PUBLIC_PICTURES.test(req.path)) {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+    next();
+  });
   app.use(cookieParser());
+  // A certificate design is one JSON document that can hold a logo, so JSON bodies may be larger than Express's 100 kb default.
+  // The design itself is capped at 2 MB by the certificates service.
+  app.useBodyParser('json', { limit: '3mb' });
   app.enableCors({
     origin: config.get('CORS_ORIGINS', { infer: true }),
     // The refresh token travels in a cookie.

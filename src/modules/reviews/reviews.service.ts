@@ -55,6 +55,7 @@ import {
   type MemberRow,
   ReviewsRepository,
 } from './reviews.repository.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 /** The review form as stored: a save replaces the whole form, as the app sends it whole. */
 function reviewValues(dto: ReviewFieldsDto) {
@@ -744,7 +745,7 @@ export class ReviewsService {
         title: `${ctx.actor.name} asks for more time on ${pid}`,
         body: `Until ${dto.date}${dto.reason ? `: ${dto.reason}` : ''}`,
         submissionId: submission.id,
-        link: `/submissions/${pid}/chair/review`,
+        link: appPaths.chairPaper(ctx.conference.slug, pid, 'review'),
       });
       const chairs = await this.recipients.chairs(tx, submission.conferenceId);
       const me = (await this.recipients.people(tx, [user.id])).get(user.id);
@@ -1148,7 +1149,7 @@ export class ReviewsService {
           title: `New review of ${pid}`,
           body: `${ctx.actor.name} sent a review of ${submission.title}`,
           submissionId: submission.id,
-          link: `/submissions/${pid}/chair/review`,
+          link: appPaths.chairPaper(ctx.conference.slug, pid, 'review'),
         });
         await this.emails.enqueue(
           tx,

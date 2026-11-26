@@ -40,6 +40,7 @@ import {
   type PaperBundle,
   SubmissionsRepository,
 } from './submissions.repository.js';
+import { appPaths } from '../../core/http/app-paths.js';
 
 /** One email per author, at least one corresponding. */
 function checkAuthors(authors: readonly AuthorDto[]): NewAuthor[] {
@@ -167,7 +168,7 @@ export class SubmissionsService {
         body: submission.title,
         conferenceId,
         submissionId: submission.id,
-        link: `/submissions/${pid}/chair`,
+        link: appPaths.chairPaper(ctx.conference.slug, pid),
       });
       await this.notifyCoAuthors(tx, ctx, added, user.id);
 
@@ -779,7 +780,7 @@ export class SubmissionsService {
         body: ctx.submission.title,
         conferenceId: ctx.conference.id,
         submissionId: ctx.submission.id,
-        link: `/submissions/${pid}/author`,
+        link: appPaths.authorPaper(ctx.conference.slug, pid),
       },
     );
   }
