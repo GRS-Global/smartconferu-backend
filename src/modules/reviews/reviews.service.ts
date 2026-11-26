@@ -392,6 +392,11 @@ export class ReviewsService {
         );
       }
       const authors = await this.reviews.authorAccounts(tx, submissionId);
+      const authorEmails = await this.reviews.authorEmails(tx, submissionId);
+      const accountEmails = await this.reviews.accountEmails(
+        tx,
+        members.flatMap((m) => (m.userId ? [m.userId] : [])),
+      );
       const now: MemberRow[] = [];
       const later: MemberRow[] = [];
       for (const member of members) {
@@ -404,6 +409,17 @@ export class ReviewsService {
         if (member.userId && authors.has(member.userId)) {
           throw AppException.businessRule(
             `${memberLabel(member)} is an author of this paper, so they can't review it.`,
+          );
+        }
+        // Same institution as an author (same email domain, webmail ignored): the web app blocks it too.
+        const clash = rules.sameInstitutionAs(
+          (member.userId ? accountEmails.get(member.userId) : null) ??
+            member.invitedEmail,
+          authorEmails,
+        );
+        if (clash) {
+          throw AppException.businessRule(
+            `${memberLabel(member)} is from the same institution as an author of this paper (${clash}), so they can't review it.`,
           );
         }
         (kind === 'assign' && member.userId ? now : later).push(member);

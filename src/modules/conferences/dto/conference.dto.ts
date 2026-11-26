@@ -7,6 +7,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -79,7 +80,11 @@ class ConferenceFieldsDto {
   @ApiPropertyOptional({ maxLength: 300, nullable: true, type: String })
   @IsOptional()
   @Transform(trimToNull)
-  @IsString()
+  @ValidateIf((_, value) => value !== null)
+  @IsUrl(
+    { protocols: ['http', 'https'], require_protocol: true },
+    { message: 'Enter a web address that starts with http:// or https://.' },
+  )
   @MaxLength(300)
   webPage?: string | null;
 

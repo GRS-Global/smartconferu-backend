@@ -235,6 +235,20 @@ describe('access rules: conference', () => {
       rules.reviewerAssignment({ role: 'chair', status: 'active' }),
     ).toBeNull();
   });
+
+  it('flags a reviewer from the same institution as an author (same email domain, webmail ignored)', () => {
+    const authors = ['Ada@Uni.example.org', 'b@gmail.com'];
+    expect(rules.sameInstitutionAs('rita@uni.example.org', authors)).toBe(
+      'Ada@Uni.example.org',
+    );
+    expect(
+      rules.sameInstitutionAs('rita@other.example.org', authors),
+    ).toBeNull();
+    // Two people on gmail.com share nothing.
+    expect(rules.sameInstitutionAs('rita@gmail.com', authors)).toBeNull();
+    expect(rules.sameInstitutionAs(null, authors)).toBeNull();
+    expect(rules.sameInstitutionAs('no-at-sign', authors)).toBeNull();
+  });
 });
 
 describe('access rules: submission', () => {

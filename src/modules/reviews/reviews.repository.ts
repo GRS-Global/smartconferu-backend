@@ -463,6 +463,40 @@ export class ReviewsRepository {
     return new Set(rows.map((r) => r.userId));
   }
 
+  /** The email addresses listed on the paper (every author) plus its submitter's sign-in address. */
+  async authorEmails(
+    executor: Executor,
+    submissionId: string,
+  ): Promise<string[]> {
+    const listed = await executor
+      .select({ email: submissionAuthors.email })
+      .from(submissionAuthors)
+      .where(eq(submissionAuthors.submissionId, submissionId));
+    const submitter = await executor
+      .select({ email: users.email })
+      .from(submissions)
+      .innerJoin(users, eq(users.id, submissions.submitterId))
+      .where(eq(submissions.id, submissionId));
+    return [...listed, ...submitter]
+      .map((r) => r.email)
+      .filter((e): e is string => Boolean(e));
+  }
+
+  /** Sign-in addresses of some accounts. */
+  async accountEmails(
+    executor: Executor,
+    userIds: string[],
+  ): Promise<Map<string, string>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+    const rows = await executor
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(inArray(users.id, userIds));
+    return new Map(rows.flatMap((r) => (r.email ? [[r.id, r.email]] : [])));
+  }
+
   // Reviews -------------------------------------------------------------------------------------
 
   async reviewForAssignment(

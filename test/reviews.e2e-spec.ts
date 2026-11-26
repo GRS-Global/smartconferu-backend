@@ -226,6 +226,36 @@ describe('Peer review and decisions', () => {
       expect(res.body.message).toMatch(/author of this paper/);
     });
 
+    it('refuses a reviewer from the same institution as an author (same email domain), but not two webmail users', async () => {
+      const s = await setup();
+      const domain = s.author.email.split('@')[1];
+      const colleague = await person({
+        firstName: 'Cora',
+        lastName: 'Colleague',
+        email: `cora@${domain}`,
+      });
+      const member = await as(s.chair.token)
+        .post(`/conferences/${s.conferenceId}/members`, {
+          email: colleague.email,
+        })
+        .expect(201);
+      await as(colleague.token)
+        .post(`/invitations/${member.body.member.id}/accept`)
+        .expect(200);
+      const res = await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/assignments`, {
+          memberIds: [member.body.member.id],
+        })
+        .expect(422);
+      expect(res.body.message).toMatch(/same institution/);
+      // The reviewer from another institution is still fine.
+      await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/assignments`, {
+          memberIds: [s.reviewerMember],
+        })
+        .expect(200);
+    });
+
     it('takes a paper back from a reviewer, who is told', async () => {
       const s = await setup();
       const res = await as(s.chair.token)

@@ -145,6 +145,30 @@ describe('Conferences, CFP and team', () => {
         .expect(400);
     });
 
+    it('accepts only a http(s) address as the conference website', async () => {
+      const chair = await person();
+      for (const webPage of [
+        'javascript:alert(1)',
+        'ftp://example.org',
+        'example.org',
+        'not a url',
+        'data:text/html,<script>alert(1)</script>',
+      ]) {
+        const res = await as(chair.token)
+          .post('/conferences', { ...request_, webPage })
+          .expect(400);
+        expect(res.body.code).toBe('VALIDATION_FAILED');
+      }
+      const ok = await as(chair.token)
+        .post('/conferences', { ...request_, webPage: 'https://example.org/x' })
+        .expect(201);
+      expect(ok.body.webPage).toBe('https://example.org/x');
+      const blank = await as(chair.token)
+        .post('/conferences', { ...request_, webPage: '   ' })
+        .expect(201);
+      expect(blank.body.webPage).toBeNull();
+    });
+
     it('approval makes it live, copies the email templates and tells the chair', async () => {
       const chair = await person();
       await t.db.query(

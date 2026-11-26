@@ -251,6 +251,40 @@ export function reviewerAssignment(member: {
   return member.status === 'invited' ? 'pending' : null;
 }
 
+/** Webmail domains: sharing one says nothing about the institution. */
+const WEBMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'yahoo.com',
+  'outlook.com',
+  'hotmail.com',
+  'icloud.com',
+  'proton.me',
+  'protonmail.com',
+  'live.com',
+  'aol.com',
+  'rediffmail.com',
+]);
+
+/**
+ * Conflict of interest by institution: the reviewer's email has the same domain as one of the
+ * paper's authors (webmail ignored). The web app applies the same rule when a chair picks a
+ * reviewer; the API refuses it too. Returns the author email it clashes with, else null.
+ */
+export function sameInstitutionAs(
+  reviewerEmail: string | null | undefined,
+  authorEmails: readonly string[],
+): string | null {
+  const domain = (reviewerEmail ?? '').toLowerCase().split('@')[1] ?? '';
+  if (!domain || WEBMAIL_DOMAINS.has(domain)) {
+    return null;
+  }
+  return (
+    authorEmails.find(
+      (e) => (e.toLowerCase().split('@')[1] ?? '') === domain,
+    ) ?? null
+  );
+}
+
 // ── Submission ────────────────────────────────────────────────────────────────────────────
 
 /** The submitter or a linked co-author (old is_submission_author). */

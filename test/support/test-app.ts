@@ -170,7 +170,8 @@ export async function createTestApp(
       return app.get(AccessTokenService).issue(userId, familyId, true);
     },
     async createUser({
-      email = `${randomUUID()}@example.test`,
+      // Every test user gets an institution of their own, so two of them never clash as "same institution" (reviewer conflicts).
+      email = `${randomUUID()}@u${randomUUID().slice(0, 8)}.example.test`,
       password = 'correct horse battery',
       verified = true,
       firstName = 'Test',
