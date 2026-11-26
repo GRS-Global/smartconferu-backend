@@ -148,6 +148,7 @@ describe('access rules: conference', () => {
       rules.canViewEmailLog,
       rules.canViewDeletionRequests,
       rules.canViewConferenceAiUsage,
+      rules.canManageParticipants,
     ]) {
       expect(rule(chair())).toBe(true);
       expect(rule(superAdmin)).toBe(true);

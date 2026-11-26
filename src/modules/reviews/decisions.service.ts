@@ -9,7 +9,11 @@ import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import * as rules from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
-import { paperId, STAGE_OUTCOMES } from '../submissions/submission.mapper.js';
+import {
+  ACCEPTED_OUTCOMES,
+  paperId,
+  STAGE_OUTCOMES,
+} from '../submissions/submission.mapper.js';
 import { SubmissionsRepository } from '../submissions/submissions.repository.js';
 import { SubmissionsService } from '../submissions/submissions.service.js';
 import type {
@@ -81,6 +85,19 @@ export class DecisionsService {
           'Record a decision before notifying the authors.',
         );
       }
+      const info = (await this.submissions.conferenceInfo(
+        tx,
+        submission.conferenceId,
+      ))!;
+      // The acceptance email tells the authors where to register and pay.
+      if (
+        ACCEPTED_OUTCOMES.includes(submission.outcome) &&
+        !info.registrationUrl
+      ) {
+        throw AppException.businessRule(
+          'Add the registration link in the conference details before sending acceptances: the authors need it to register and pay.',
+        );
+      }
 
       const changed =
         submission.notifiedOutcome !== null &&
@@ -107,10 +124,6 @@ export class DecisionsService {
       const label =
         (await this.reviews.decisionTypeLabel(tx, submission.decisionTypeId)) ??
         submission.outcome;
-      const info = (await this.submissions.conferenceInfo(
-        tx,
-        submission.conferenceId,
-      ))!;
       const ctx = await this.papers.context(tx, user, info, submissionId);
       const pid = paperId(info.acronym, submission.paperNo);
       await this.notifications.notify(
@@ -147,6 +160,8 @@ export class DecisionsService {
           reviewers: [...people.values()],
           cameraReadyDeadline: dates?.cameraReadyDeadline ?? null,
           notificationDate: dates?.notificationDate ?? null,
+          registrationUrl: info.registrationUrl,
+          registrationDeadline: info.registrationDeadline,
         }),
         { sentBy: user.id },
       );

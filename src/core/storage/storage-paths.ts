@@ -12,6 +12,8 @@
  *     versions/v<n>-[camera-ready-]<tag>-<file name>   every version is kept
  *     plagiarism/report-<id>.pdf
  *     supporting/<tag>-<file name>
+ *     registration/receipt-<id>.<ext>                   every receipt is kept
+ *   participants/<participant>/receipt-<id>.<ext>
  * ```
  */
 export const storagePaths = {
@@ -41,4 +43,20 @@ export const storagePaths = {
     `${storagePaths.paperFolder(conferenceId, submissionId)}supporting/${file.tag}-${file.name}`,
   plagiarismReport: (conferenceId: string, submissionId: string, id: string) =>
     `${storagePaths.paperFolder(conferenceId, submissionId)}plagiarism/report-${id}.pdf`,
+  /** The receipt of a paper's registration fee (every upload is kept). */
+  paperReceipt: (
+    conferenceId: string,
+    submissionId: string,
+    id: string,
+    ext: string,
+  ) =>
+    `${storagePaths.paperFolder(conferenceId, submissionId)}registration/receipt-${id}.${ext}`,
+  /** The receipt of a participant's registration fee (every upload is kept). */
+  participantReceipt: (
+    conferenceId: string,
+    participantId: string,
+    id: string,
+    ext: string,
+  ) =>
+    `conferences/${conferenceId}/participants/${participantId}/receipt-${id}.${ext}`,
 };

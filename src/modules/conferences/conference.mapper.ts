@@ -44,6 +44,10 @@ export function toPublicConference(
     endDate: row.endDate,
     submissionDeadline: iso(row.submissionDeadline),
     reviewMode: row.reviewMode,
+    registrationUrl: row.registrationUrl,
+    participantRegistrationUrl: row.participantRegistrationUrl,
+    registrationDeadline: row.registrationDeadline,
+    currency: row.currency,
     details: row.details as Record<string, unknown>,
     cfpStatus: publicCfpStatus(row.cfpStatus),
   };

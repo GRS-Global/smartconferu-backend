@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
 import type { Executor, Tx } from '../../core/database/database.types.js';
 import {
   cfps,
+  conferenceParticipants,
   conferences,
   decisionEvents,
   decisionTypes,
@@ -18,9 +19,23 @@ export type SubmissionRow = typeof submissions.$inferSelect;
 export type AuthorRow = typeof submissionAuthors.$inferSelect;
 export type FileRow = typeof submissionFiles.$inferSelect;
 export type RegistrationRow = typeof submissionRegistrations.$inferSelect;
+export type ParticipantRow = typeof conferenceParticipants.$inferSelect;
 export type RegistrationValues = Pick<
   RegistrationRow,
-  'payment' | 'attendance' | 'presenterEmail' | 'note'
+  | 'payment'
+  | 'amount'
+  | 'method'
+  | 'paidOn'
+  | 'transactionRef'
+  | 'payerName'
+  | 'attendance'
+  | 'presenterEmail'
+  | 'note'
+>;
+/** The current receipt of a registration (all null: none). */
+export type ReceiptValues = Pick<
+  RegistrationRow,
+  'receiptPath' | 'receiptName' | 'receiptSize' | 'receiptUploadedAt'
 >;
 
 export interface ConferenceInfo {
@@ -30,6 +45,9 @@ export interface ConferenceInfo {
   title: string;
   contactEmail: string | null;
   submissionDeadline: Date | null;
+  registrationUrl: string | null;
+  registrationDeadline: string | null;
+  currency: string | null;
   reviewMode: (typeof conferences.$inferSelect)['reviewMode'];
   cfpStatus: (typeof cfps.$inferSelect)['status'];
 }
@@ -42,12 +60,17 @@ export interface NewAuthor {
   corresponding: boolean;
 }
 
-/** What a paper needs to be shown: the row, its authors, its files and its registration (if recorded). */
+/**
+ * What a paper needs to be shown: the row, its authors, its files, its registration (if recorded),
+ * its co-authors registered as participants, and the conference's currency.
+ */
 export interface PaperBundle {
   submission: SubmissionRow;
   authors: AuthorRow[];
   files: FileRow[];
   registration: RegistrationRow | null;
+  participants: ParticipantRow[];
+  currency: string | null;
 }
 
 const lowerEmail = (email: string) => email.trim().toLowerCase();
@@ -66,6 +89,9 @@ export class SubmissionsRepository {
         title: conferences.title,
         contactEmail: conferences.contactEmail,
         submissionDeadline: conferences.submissionDeadline,
+        registrationUrl: conferences.registrationUrl,
+        registrationDeadline: conferences.registrationDeadline,
+        currency: conferences.currency,
         reviewMode: conferences.reviewMode,
         cfpStatus: sql<
           ConferenceInfo['cfpStatus']
@@ -103,6 +129,30 @@ export class SubmissionsRepository {
         target: submissionRegistrations.submissionId,
         set: row,
       });
+  }
+
+  async participant(
+    executor: Executor,
+    participantId: string,
+  ): Promise<ParticipantRow | undefined> {
+    const [row] = await executor
+      .select()
+      .from(conferenceParticipants)
+      .where(eq(conferenceParticipants.id, participantId));
+    return row;
+  }
+
+  /** Sets (or clears) the paper's current receipt; the registration row exists already. */
+  async setRegistrationReceipt(
+    tx: Tx,
+    submissionId: string,
+    receipt: ReceiptValues,
+    updatedBy: string,
+  ): Promise<void> {
+    await tx
+      .update(submissionRegistrations)
+      .set({ ...receipt, updatedBy, updatedAt: new Date() })
+      .where(eq(submissionRegistrations.submissionId, submissionId));
   }
 
   async nextPaperNo(tx: Tx, conferenceId: string): Promise<number> {
@@ -290,28 +340,52 @@ export class SubmissionsRepository {
       .where(where)
       .orderBy(asc(submissions.conferenceId), asc(submissions.paperNo));
     const ids = rows.map((r) => r.id);
-    const [authors, files, registrations] = await Promise.all([
-      ids.length === 0
-        ? []
-        : executor
-            .select()
-            .from(submissionAuthors)
-            .where(inArray(submissionAuthors.submissionId, ids))
-            .orderBy(asc(submissionAuthors.position)),
-      this.files(executor, ids),
-      ids.length === 0
-        ? []
-        : executor
-            .select()
-            .from(submissionRegistrations)
-            .where(inArray(submissionRegistrations.submissionId, ids)),
-    ]);
+    const conferenceIds = [...new Set(rows.map((r) => r.conferenceId))];
+    const [authors, files, registrations, participants, currencies] =
+      await Promise.all([
+        ids.length === 0
+          ? []
+          : executor
+              .select()
+              .from(submissionAuthors)
+              .where(inArray(submissionAuthors.submissionId, ids))
+              .orderBy(asc(submissionAuthors.position)),
+        this.files(executor, ids),
+        ids.length === 0
+          ? []
+          : executor
+              .select()
+              .from(submissionRegistrations)
+              .where(inArray(submissionRegistrations.submissionId, ids)),
+        ids.length === 0
+          ? []
+          : executor
+              .select()
+              .from(conferenceParticipants)
+              .where(inArray(conferenceParticipants.submissionId, ids))
+              .orderBy(
+                asc(conferenceParticipants.createdAt),
+                asc(conferenceParticipants.id),
+              ),
+        conferenceIds.length === 0
+          ? []
+          : executor
+              .select({ id: conferences.id, currency: conferences.currency })
+              .from(conferences)
+              .where(inArray(conferences.id, conferenceIds)),
+      ]);
     return rows.map((submission) => ({
       submission,
       authors: authors.filter((a) => a.submissionId === submission.id),
       files: files.filter((f) => f.submissionId === submission.id),
       registration:
         registrations.find((r) => r.submissionId === submission.id) ?? null,
+      participants: participants.filter(
+        (p) => p.submissionId === submission.id,
+      ),
+      currency:
+        currencies.find((c) => c.id === submission.conferenceId)?.currency ??
+        null,
     }));
   }
 

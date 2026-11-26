@@ -3,20 +3,25 @@ import {
   bigint,
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { timestamptz, updatedAt } from './columns.js';
+import { createdAt, timestamptz, updatedAt } from './columns.js';
 import { conferences, decisionTypes, tracks } from './conferences.js';
 import {
   attendanceMode,
   decisionOutcome,
   fileKind,
+  participantCategory,
+  paymentMethod,
   paymentStatus,
   submissionStatus,
 } from './enums.js';
@@ -109,25 +114,95 @@ export const submissionAuthors = pgTable(
 );
 
 /**
- * An accepted paper's registration, recorded by hand by a chair: whether its fee is paid, whether
- * it is presented in person or online, and who presents it. One row per paper, created on the
- * first change; a paper without a row is "not paid", attendance not known yet. The presenter is
- * kept by email, so editing the author list never loses it.
+ * A registration fee and how it was paid, as the chair records it (the payment happens on the
+ * conference's own site). The details are filled in only when the fee is paid; the amount is in
+ * the conference's currency. The receipt is an optional file the chair uploads for the payer.
+ */
+const paymentColumns = () => ({
+  payment: paymentStatus().notNull().default('not_paid'),
+  amount: numeric({ precision: 12, scale: 2, mode: 'number' }),
+  method: paymentMethod(),
+  paidOn: date('paid_on', { mode: 'string' }),
+  transactionRef: text('transaction_ref'),
+  payerName: text('payer_name'),
+  /** Object key in storage; every uploaded receipt stays in storage, this is the current one. */
+  receiptPath: text('receipt_path'),
+  receiptName: text('receipt_name'),
+  receiptSize: bigint('receipt_size', { mode: 'number' }),
+  receiptUploadedAt: timestamptz('receipt_uploaded_at'),
+});
+
+/**
+ * An accepted paper's registration, recorded by hand by a chair: whether its fee is paid (and how),
+ * whether it is presented in person or online, and who presents it. One row per paper, created on
+ * the first change; a paper without a row is "not paid", attendance not known yet. The presenter
+ * is kept by email, so editing the author list never loses it.
  */
 export const submissionRegistrations = pgTable('submission_registrations', {
   submissionId: uuid('submission_id')
     .primaryKey()
     .references(() => submissions.id, { onDelete: 'cascade' }),
-  payment: paymentStatus().notNull().default('not_paid'),
+  ...paymentColumns(),
   attendance: attendanceMode(),
   presenterEmail: text('presenter_email'),
-  /** The chair's own note (receipt number, amount...). Never shown to authors. */
+  /** The chair's own note. Never shown to authors. */
   note: text(),
   updatedBy: uuid('updated_by').references(() => users.id, {
     onDelete: 'set null',
   }),
   updatedAt: updatedAt(),
 });
+
+/**
+ * Someone registered for the conference without a paper of their own: a Standard or Student
+ * participant, or a co-author of an accepted paper who registers (and pays) to come along. The
+ * chair adds them by hand or by import after they registered on the conference's site.
+ * One row per email per conference, or per email per paper for co-authors.
+ */
+export const conferenceParticipants = pgTable(
+  'conference_participants',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    conferenceId: uuid('conference_id')
+      .notNull()
+      .references(() => conferences.id, { onDelete: 'cascade' }),
+    category: participantCategory().notNull(),
+    /** The paper of a co-author participant (null for the other categories). */
+    submissionId: uuid('submission_id').references(() => submissions.id, {
+      onDelete: 'cascade',
+    }),
+    name: text().notNull(),
+    email: text().notNull(),
+    affiliation: text(),
+    country: text(),
+    attendance: attendanceMode(),
+    ...paymentColumns(),
+    /** The chair's own note. Never shown to the participant. */
+    note: text(),
+    createdBy: uuid('created_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: createdAt(),
+    updatedBy: uuid('updated_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('conference_participants_conference_idx').on(t.conferenceId),
+    index('conference_participants_submission_idx').on(t.submissionId),
+    uniqueIndex('conference_participants_email_key')
+      .on(t.conferenceId, sql`lower(${t.email})`)
+      .where(sql`${t.submissionId} is null`),
+    uniqueIndex('conference_participants_paper_email_key')
+      .on(t.submissionId, sql`lower(${t.email})`)
+      .where(sql`${t.submissionId} is not null`),
+    check(
+      'conference_participants_paper_check',
+      sql`(${t.category} = 'co_author') = (${t.submissionId} is not null)`,
+    ),
+  ],
+);
 
 export const submissionFiles = pgTable(
   'submission_files',

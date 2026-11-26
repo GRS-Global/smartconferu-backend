@@ -180,6 +180,17 @@ export class ConferencesService {
         dto.startDate !== undefined ? dto.startDate : current.startDate,
         dto.endDate !== undefined ? dto.endDate : current.endDate,
       );
+      // Amounts are stored without a currency: changing it would change what they mean.
+      if (
+        dto.currency !== undefined &&
+        dto.currency !== current.currency &&
+        current.currency !== null &&
+        (await this.conferences.hasRecordedAmounts(tx, conferenceId))
+      ) {
+        throw AppException.businessRule(
+          `Payments are already recorded in ${current.currency}, so the currency can't be changed.`,
+        );
+      }
       if (details) {
         values.details = {
           ...(current.details as Record<string, unknown>),

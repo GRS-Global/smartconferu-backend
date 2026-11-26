@@ -21,6 +21,9 @@ export function setupApp(app: NestExpressApplication): void {
   // AWS load balancers sit in front of the app: trust one proxy hop for the client IP.
   app.set('trust proxy', 1);
   app.use(helmet());
+  // Room for the biggest bodies the API takes: conference settings (200 KB) and a registration
+  // import (up to 2,000 rows). Files come as multipart, not JSON.
+  app.useBodyParser('json', { limit: '2mb' });
   app.use(cookieParser());
   app.enableCors({
     origin: config.get('CORS_ORIGINS', { infer: true }),

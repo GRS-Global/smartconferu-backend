@@ -7,6 +7,7 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -23,6 +24,13 @@ const trim = ({ value }: { value: unknown }) =>
 /** Blank optional text is stored as null. */
 const trimToNull = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() || null : value;
+
+/** A link a chair enters: http(s) with a real host. */
+const LINK = {
+  protocols: ['http', 'https'],
+  require_protocol: true,
+  require_tld: true,
+};
 
 export const CONFERENCE_MODES = ['in_person', 'virtual', 'hybrid'] as const;
 export type ConferenceMode = (typeof CONFERENCE_MODES)[number];
@@ -200,6 +208,62 @@ export class UpdateConferenceDto extends ConferenceFieldsDto {
   @IsOptional()
   @IsIn(reviewMode.enumValues)
   reviewMode?: ReviewMode;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    example: 'https://conference.example.org/register',
+    description:
+      'Where authors of accepted papers register and pay. Needed before acceptances can be sent; it goes in the acceptance email.',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @ValidateIf((_, value) => value !== null)
+  @IsUrl(LINK, { message: 'Enter the full registration link (https://…).' })
+  @MaxLength(500)
+  registrationUrl?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    description:
+      'Where participants without a paper register (Standard, Student, Co-author).',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @ValidateIf((_, value) => value !== null)
+  @IsUrl(LINK, {
+    message: 'Enter the full participant registration link (https://…).',
+  })
+  @MaxLength(500)
+  participantRegistrationUrl?: string | null;
+
+  @ApiPropertyOptional({ example: '2027-02-28', nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @ValidateIf((_, value) => value !== null)
+  @IsISO8601(
+    { strict: true },
+    { message: 'registrationDeadline must be a date' },
+  )
+  registrationDeadline?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    example: 'INR',
+    description:
+      'ISO 4217 code of every amount recorded in the conference. Can only change while no amount is recorded.',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() || null : value,
+  )
+  @ValidateIf((_, value) => value !== null)
+  @Matches(/^[A-Z]{3}$/, {
+    message: 'Use the 3-letter currency code, e.g. INR or USD.',
+  })
+  currency?: string | null;
 }
 
 export class UpdateSettingsDto {
@@ -284,6 +348,27 @@ export class PublicConferenceResponse {
   @ApiProperty({ nullable: true, type: String, format: 'date-time' })
   submissionDeadline: string | null;
   @ApiProperty({ enum: reviewMode.enumValues }) reviewMode: ReviewMode;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Where authors of accepted papers register and pay.',
+  })
+  registrationUrl: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Where participants without a paper register.',
+  })
+  participantRegistrationUrl: string | null;
+  @ApiProperty({ nullable: true, type: String, example: '2027-02-28' })
+  registrationDeadline: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    example: 'INR',
+    description: 'Currency of the registration fees.',
+  })
+  currency: string | null;
   @ApiProperty({ type: 'object', additionalProperties: true })
   details: Record<string, unknown>;
   @ApiProperty({

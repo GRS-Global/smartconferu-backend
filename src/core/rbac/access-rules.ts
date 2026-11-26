@@ -209,6 +209,9 @@ export const canViewDeletionRequests = isChair;
 /** AI usage of everyone in the conference (ai_usage: own, chairs and admins read). */
 export const canViewConferenceAiUsage = isChair;
 
+/** See and record the conference's participants, their payments and receipts, and import them. */
+export const canManageParticipants = isChair;
+
 /**
  * Make a new submission. The conference must be active and its CFP published, for everyone
  * (a draft or closed CFP takes no papers, not even from a chair). Authors must also be before the

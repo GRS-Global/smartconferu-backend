@@ -65,6 +65,7 @@ smartconferu-backend/
 │  │  ├─ conferences/      conferences, Call for Papers, team and invitations
 │  │  ├─ submissions/      papers: submit, lists, paper page, edit, withdraw, screening
 │  │  ├─ reviews/          assignments, review form, chair reviews, sending decisions, reminders
+│  │  ├─ registrations/    participants without a paper, Excel/CSV import of payments
 │  │  ├─ communications/   email templates, Email Logs, the chair's own emails
 │  │  ├─ notifications/    the bell (/me/notifications) and live events (/me/events, SSE)
 │  │  ├─ master-data/      societies, institutions, research areas (read by all, kept by the super admin)
@@ -351,21 +352,72 @@ How it works:
 - **Reminders:** the jobs runner sends "N days left" and "Last day" per the conference's review
   timeline (`settings.reviewTimeline`), once per reviewer per day (`reminders/`).
 
-### Payment and attendance (until there is a registration module)
+### Registration and payments (modules/submissions, modules/registrations)
 
-A chair records by hand, per accepted paper (decision `accept` or `registered`):
-`PUT /submissions/{id}/registration` with `payment` (`not_paid` | `paid` | `waived`),
-`attendance` (`physical` | `virtual` | `null` = not known yet), `presenterEmail` (one of the
-paper's authors, or `null`) and a `note` (receipt number, amount...). Every field is sent each time.
+**Conference settings** (`PATCH /conferences/{id}`, chairs): `registrationUrl` (where authors of
+accepted papers register and pay), `participantRegistrationUrl` (for participants without a paper;
+shown for reference only), `registrationDeadline` and `currency` (ISO 4217, e.g. `INR`; sent in any
+case). Amounts are kept without a currency, so the currency can't change once any amount is recorded
+(422). **Acceptances can't be sent without `registrationUrl`** (422); the acceptance email fills in
+`{{registration_link}}` and `{{registration_deadline}}`.
 
+**Paper registration**: a chair records it by hand, per accepted paper (decision `accept` or
+`registered`): `PUT /submissions/{id}/registration` with `payment` (`not_paid` | `paid` | `waived`),
+the payment details `amount`, `method` (`bank_transfer` | `online` | `card` | `cash` | `other`),
+`paidOn`, `transactionRef`, `payerName`, plus `attendance` (`physical` | `virtual` | `null` = not known
+yet), `presenterEmail` (one of the paper's authors, or `null`) and a private `note`. Every field is
+sent each time.
+
+- **Payment rules** (`submissions/payment.ts`, shared by papers, participants and the import): Paid
+  needs an amount (> 0, 2 decimals) and a conference currency; the details are allowed only when
+  Paid (send `null` otherwise); the payment date can't be in the future (one day of slack) or before
+  2000.
 - Kept in `submission_registrations`, one row per paper (`registration.service.ts`). A paper
   without a row is "not paid", attendance not known. The presenter is kept by email, so editing
   the author list never loses it.
-- The paper (and the chair's list) carries `registration`: chairs see it while the paper is
-  accepted; authors once they were told it is accepted, without the note; reviewers never.
-- A paper that is no longer accepted keeps its row, hidden; it shows again if accepted again.
-  Withdrawn papers and papers not accepted are refused (422).
-- No email is sent. Each change is in Activity Logs (module "Registration", before → after).
+- The paper (and the chair's list) carries `registration` (with `currency` and `receipt`): chairs see
+  it while the paper is accepted; authors once they were told it is accepted, without the note;
+  reviewers never. A paper no longer accepted keeps its row, hidden; it shows again if accepted
+  again. Withdrawn papers and papers not accepted are refused (422).
+- No email is sent.
+
+**Receipts** (PDF, JPG, PNG or WebP, 10 MB, checked by their first bytes): chairs upload with
+`POST /submissions/{id}/registration/receipt` (multipart `file`; the fee must be Paid; replaces the
+current one) and remove with `DELETE …/receipt`. `GET …/receipt` downloads it: chairs, and authors
+once told the paper is accepted. A fee that stops being Paid loses its receipt. Old files stay in
+storage (`…/registration/receipt-{id}.{ext}` in the paper's folder).
+
+**Participants** (`modules/registrations`, chairs only, `canManageParticipants`): people registered on
+the conference's site without a paper of their own. `category` is `standard`, `student` or
+`co_author`; a co-author is linked to an accepted paper by `submissionId` (`onAuthorList: false` flags
+an email that isn't on that paper's author list). Each has name, email, affiliation, country,
+attendance, a note and the same payment fields and rules.
+
+- `GET|POST /conferences/{id}/participants`, `PUT|DELETE …/participants/{participantId}`, and
+  `POST|DELETE|GET …/participants/{participantId}/receipt`.
+- One email per conference (case-insensitive), or one per paper for co-authors (409 otherwise).
+- The paper page shows its co-author participants (`participants`): chairs see all while the paper
+  is accepted; an author only their own, once told it is accepted.
+  `GET /submissions/{id}/participants/{participantId}/receipt` lets them download their receipt.
+- Kept in `conference_participants`; filters and the CSV export are done in the browser.
+
+**Excel / CSV import** (`POST /conferences/{id}/registrations/import`, chairs): the browser reads
+the sheet and sends `{ kind, rows, apply }`. `rows` holds cell text keyed by column (at most 2,000;
+request bodies may be up to 2 MB).
+
+- `kind: "papers"`: `paperId` (`ICX-12`, `12` or `#12`), `payment`, `amount`, `method`, `paidOn`,
+  `transactionRef`, `payerName`, `note`. Matched by paper id; the paper must be accepted.
+- `kind: "participants"`: `category`, `name`, `email`, `affiliation`, `country`, `attendance`,
+  `paperId` (co-authors) and the payment columns. Matched by email (and paper for co-authors).
+- Everyday words are accepted ("Not paid", "UPI", "Digital", "Co-author"…), dates as YYYY-MM-DD or
+  DD/MM/YYYY, amounts with a currency sign or thousands separators. An amount that could be read
+  two ways ("1,50", "1.250,00") is an error, never guessed. A column left out keeps its value.
+- `apply: false` is the preview: every row comes back as `new`, `update` (with each change
+  `from` → `to`), `unchanged` or `error` (with reasons), plus warnings. `apply: true` saves all rows in
+  one transaction, or none while any row has an error (`applied: false`).
+
+**Activity Logs**: payment changes (with amount and method), receipts, participant changes and
+each import (module "Registration" or "Participants"; changes from an import say so).
 
 ## Notifications and live events (core/notifications, core/realtime, modules/notifications)
 

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -58,6 +59,10 @@ import {
   ScreeningSettingsResponse,
   UpdateScreeningSettingsDto,
 } from './dto/screening.dto.js';
+import {
+  MAX_RECEIPT_BYTES,
+  type ReceiptUpload,
+} from './payment-receipts.service.js';
 import { RegistrationService } from './registration.service.js';
 import { ScreeningService } from './screening.service.js';
 import type { AutoCheck } from './screening/auto-check.js';
@@ -293,12 +298,7 @@ export class SubmissionsController {
     @SubmissionId() submissionId: string,
     @Param('fileId', ParseUUIDPipe) fileId: string,
   ): Promise<StreamableFile> {
-    const file = await this.files.download(user, submissionId, fileId);
-    return new StreamableFile(file.data, {
-      type: file.contentType,
-      disposition: `attachment; filename="${file.fileName.replace(/[^\w.-]+/g, '_')}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-      length: file.data.length,
-    });
+    return fileResponse(await this.files.download(user, submissionId, fileId));
   }
 
   @Get()
@@ -500,4 +500,92 @@ export class SubmissionsController {
   ): Promise<SubmissionResponse> {
     return this.registration.save(user, submissionId, dto, client);
   }
+
+  @Post(':submissionId/registration/receipt')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_RECEIPT_BYTES + 1, files: 1 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOperation({
+    summary:
+      'Attach the payment receipt of an accepted paper (chairs; PDF, JPG, PNG or WebP, 10 MB). The fee must be recorded as Paid; replaces the current receipt.',
+  })
+  @ApiOkResponse({ type: SubmissionResponse })
+  uploadReceipt(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+    @UploadedFile() file: ReceiptUpload | undefined,
+    @Client() client: ClientInfo,
+  ): Promise<SubmissionResponse> {
+    return this.registration.uploadReceipt(user, submissionId, file, client);
+  }
+
+  @Delete(':submissionId/registration/receipt')
+  @ApiOperation({ summary: "Remove the paper's payment receipt (chairs)" })
+  @ApiOkResponse({ type: SubmissionResponse })
+  removeReceipt(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+    @Client() client: ClientInfo,
+  ): Promise<SubmissionResponse> {
+    return this.registration.removeReceipt(user, submissionId, client);
+  }
+
+  @Get(':submissionId/registration/receipt')
+  @ApiProduces('application/pdf', 'image/jpeg', 'image/png', 'image/webp')
+  @ApiOperation({
+    summary:
+      "Download the paper's payment receipt (chairs; the authors once told the paper is accepted)",
+  })
+  async downloadReceipt(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+  ): Promise<StreamableFile> {
+    return fileResponse(
+      await this.registration.downloadReceipt(user, submissionId),
+    );
+  }
+
+  @Get(':submissionId/participants/:participantId/receipt')
+  @ApiProduces('application/pdf', 'image/jpeg', 'image/png', 'image/webp')
+  @ApiOperation({
+    summary:
+      "Download a co-author participant's payment receipt (chairs, and that co-author)",
+  })
+  async downloadParticipantReceipt(
+    @CurrentUser() user: AuthUser,
+    @SubmissionId() submissionId: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+  ): Promise<StreamableFile> {
+    return fileResponse(
+      await this.registration.downloadParticipantReceipt(
+        user,
+        submissionId,
+        participantId,
+      ),
+    );
+  }
+}
+
+/** A stored file as a download, its name kept (and made safe for the header). */
+export function fileResponse(file: {
+  data: Buffer;
+  fileName: string;
+  contentType: string;
+}): StreamableFile {
+  return new StreamableFile(file.data, {
+    type: file.contentType,
+    disposition: `attachment; filename="${file.fileName.replace(/[^\w.-]+/g, '_')}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    length: file.data.length,
+  });
 }

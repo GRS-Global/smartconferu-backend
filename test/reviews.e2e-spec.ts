@@ -91,6 +91,13 @@ describe('Peer review and decisions', () => {
       })
       .expect(201);
     const conferenceId = created.body.id as string;
+    // Acceptances can't be sent without the registration link.
+    await as(chair.token)
+      .patch(`/conferences/${conferenceId}`, {
+        registrationUrl: 'https://icx.example.org/register',
+        registrationDeadline: '2027-02-28',
+      })
+      .expect(200);
     const admin = await superAdmin();
     await as(admin.token)
       .post(`/admin/conferences/${conferenceId}/decision`, { approve: true })
@@ -757,6 +764,21 @@ describe('Peer review and decisions', () => {
         .expect(200);
       expect(before.body.outcome).toBe('no_decision');
 
+      // Without the registration link, the acceptance can't go out.
+      await as(s.chair.token)
+        .patch(`/conferences/${s.conferenceId}`, { registrationUrl: null })
+        .expect(200);
+      const noLink = await as(s.chair.token)
+        .post(`/submissions/${s.submissionId}/decision/notify`)
+        .expect(422);
+      expect(noLink.body.message).toMatch(/Add the registration link/);
+      expect(await emailsTo(s.author.email)).toEqual([]);
+      await as(s.chair.token)
+        .patch(`/conferences/${s.conferenceId}`, {
+          registrationUrl: 'https://icx.example.org/register',
+        })
+        .expect(200);
+
       const sent = await as(s.chair.token)
         .post(`/submissions/${s.submissionId}/decision/notify`, {
           note: 'Well done.',
@@ -790,6 +812,10 @@ describe('Peer review and decisions', () => {
       const acceptance = t.outbox().find((m) => m.to === s.author.email);
       expect(acceptance?.text).toContain('Clear and convincing.');
       expect(acceptance?.text).not.toContain('Strong paper.');
+      // It tells the authors where and by when to register.
+      expect(acceptance?.text).toContain(
+        'Register by 28 Feb 2027: https://icx.example.org/register',
+      );
 
       await as(s.chair.token)
         .post(`/submissions/${s.submissionId}/decision`, {

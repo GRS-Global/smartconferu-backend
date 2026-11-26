@@ -17,6 +17,7 @@ import type { Executor } from '../../core/database/database.types.js';
 import {
   cfps,
   conferenceDeletionRequests,
+  conferenceParticipants,
   conferenceEmailTemplates,
   conferenceMembers,
   conferences,
@@ -24,6 +25,7 @@ import {
   emailTemplates,
   profiles,
   submissionAuthors,
+  submissionRegistrations,
   submissions,
   users,
 } from '../../core/database/schema/index.js';
@@ -150,6 +152,21 @@ export class ConferencesRepository {
       .where(and(eq(conferences.id, id), eq(conferences.status, from)))
       .returning({ id: conferences.id });
     return rows.length > 0;
+  }
+
+  /** Whether any registration fee of the conference has an amount (in its currency). */
+  async hasRecordedAmounts(tx: Executor, id: string): Promise<boolean> {
+    const [row] = await tx.execute<{ found: boolean }>(sql`select (
+      exists (
+        select 1 from ${submissionRegistrations}
+        join ${submissions} on ${submissions.id} = ${submissionRegistrations.submissionId}
+        where ${submissions.conferenceId} = ${id} and ${submissionRegistrations.amount} is not null
+      ) or exists (
+        select 1 from ${conferenceParticipants}
+        where ${conferenceParticipants.conferenceId} = ${id} and ${conferenceParticipants.amount} is not null
+      )
+    ) as found`);
+    return Boolean(row?.found);
   }
 
   /** Locks the row for the rest of the transaction (settings are merged read-modify-write). */

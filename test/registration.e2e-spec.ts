@@ -7,6 +7,8 @@ import {
 
 interface Registration {
   payment: string;
+  amount: number | null;
+  currency: string | null;
   attendance: string | null;
   presenterEmail: string | null;
   presenterName: string | null;
@@ -43,6 +45,11 @@ describe('Payment and attendance of accepted papers', () => {
         .send(body ?? {}),
     put: (path: string, body: object) =>
       http().put(api(path)).set('Authorization', `Bearer ${token}`).send(body),
+    patch: (path: string, body: object) =>
+      http()
+        .patch(api(path))
+        .set('Authorization', `Bearer ${token}`)
+        .send(body),
   });
 
   /** A live conference, its chair, and two papers by `author` (the second with a co-author). */
@@ -66,6 +73,14 @@ describe('Payment and attendance of accepted papers', () => {
       })
       .expect(201);
     const conferenceId = created.body.id as string;
+    // Fees are in EUR, and acceptances need the registration link.
+    await as(chair.token)
+      .patch(`/conferences/${conferenceId}`, {
+        currency: 'eur',
+        registrationUrl: 'https://icx.example.org/register',
+        registrationDeadline: '2027-02-28',
+      })
+      .expect(200);
     await as(adminToken)
       .post(`/admin/conferences/${conferenceId}/decision`, { approve: true })
       .expect(204);
@@ -118,9 +133,14 @@ describe('Payment and attendance of accepted papers', () => {
 
   const paid = {
     payment: 'paid',
+    amount: 250,
+    method: 'bank_transfer',
+    paidOn: '2026-11-20',
+    transactionRef: 'TX-4411',
+    payerName: 'Ben Second',
     attendance: 'physical',
     presenterEmail: 'ben.second@uni.example',
-    note: 'Receipt 4411, 250 EUR',
+    note: 'Paid by the university',
   };
 
   it('lets a chair record payment and attendance once a paper is accepted', async () => {
@@ -143,6 +163,13 @@ describe('Payment and attendance of accepted papers', () => {
       .expect(200);
     expect(accepted.body.registration).toEqual({
       payment: 'not_paid',
+      amount: null,
+      currency: 'EUR',
+      method: null,
+      paidOn: null,
+      transactionRef: null,
+      payerName: null,
+      receipt: null,
       attendance: null,
       presenterEmail: null,
       presenterName: null,
@@ -157,10 +184,16 @@ describe('Payment and attendance of accepted papers', () => {
     // The presenter is matched case-insensitively and kept as written on the paper.
     expect(registration).toMatchObject({
       payment: 'paid',
+      amount: 250,
+      currency: 'EUR',
+      method: 'bank_transfer',
+      paidOn: '2026-11-20',
+      transactionRef: 'TX-4411',
+      payerName: 'Ben Second',
       attendance: 'physical',
       presenterEmail: 'Ben.Second@uni.example',
       presenterName: 'Ben Second',
-      note: 'Receipt 4411, 250 EUR',
+      note: 'Paid by the university',
     });
     expect(registration.updatedAt).toEqual(expect.any(String));
 
@@ -175,6 +208,9 @@ describe('Payment and attendance of accepted papers', () => {
       .expect(200);
     expect(changed.body.registration).toMatchObject({
       payment: 'waived',
+      amount: null,
+      method: null,
+      transactionRef: null,
       attendance: null,
       presenterEmail: null,
       note: null,
@@ -202,7 +238,8 @@ describe('Payment and attendance of accepted papers', () => {
     expect(entries[1]).toMatchObject({
       description: 'Recorded payment and attendance for ICX-1.',
       previousValue: 'Not paid · Attendance not known',
-      newValue: 'Paid · Physical · Ben.Second@uni.example',
+      newValue:
+        'Paid 250.00 EUR by Bank transfer · Physical · Ben.Second@uni.example',
     });
   });
 
@@ -221,6 +258,31 @@ describe('Payment and attendance of accepted papers', () => {
       .put(path, { ...paid, presenterEmail: 'someone@else.example' })
       .expect(400);
     expect(stranger.body.message).toMatch(/one of the paper/);
+
+    // The payment rules: an amount for Paid, details only for Paid, no future date.
+    const noAmount = await as(s.chair.token)
+      .put(path, { ...paid, amount: null })
+      .expect(400);
+    expect(noAmount.body.message).toBe('Enter the amount paid.');
+    const details = await as(s.chair.token)
+      .put(path, { ...paid, payment: 'not_paid' })
+      .expect(400);
+    expect(details.body.message).toMatch(/only when the fee is Paid/);
+    expect(
+      (details.body.details as Array<{ field: string }>).map((d) => d.field),
+    ).toEqual(
+      expect.arrayContaining(['amount', 'method', 'paidOn', 'transactionRef']),
+    );
+    const future = await as(s.chair.token)
+      .put(path, { ...paid, paidOn: '2099-01-01' })
+      .expect(400);
+    expect(future.body.message).toMatch(/can’t be in the future/);
+    await as(s.chair.token)
+      .put(path, { ...paid, method: 'cheque' })
+      .expect(400);
+    await as(s.chair.token)
+      .put(path, { ...paid, amount: 10.555 })
+      .expect(400);
 
     // The author can't mark their own paper as paid; an outsider doesn't even see it.
     await as(s.author.token).put(path, paid).expect(403);

@@ -94,6 +94,25 @@ export const attendanceMode = pgEnum('attendance_mode', [
   'virtual',
 ]);
 
+/** How a registration fee was paid (recorded by the chair; the payment itself happens outside). */
+export const paymentMethod = pgEnum('payment_method', [
+  'bank_transfer',
+  'online',
+  'card',
+  'cash',
+  'other',
+]);
+
+/** A conference participant without a paper of their own (registered on the conference's site). */
+export const participantCategory = pgEnum('participant_category', [
+  /** A delegate attending sessions without presenting a paper. */
+  'standard',
+  /** A full-time student (student ID on request). */
+  'student',
+  /** A co-author of an accepted paper attending to support the presenting author. */
+  'co_author',
+]);
+
 export const fileKind = pgEnum('file_kind', [
   'paper',
   'revision',

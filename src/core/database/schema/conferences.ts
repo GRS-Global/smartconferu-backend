@@ -48,6 +48,13 @@ export const conferences = pgTable(
     notificationDate: date('notification_date'),
     cameraReadyDeadline: timestamptz('camera_ready_deadline'),
     reviewMode: reviewMode('review_mode').notNull().default('double_blind'),
+    /** Where authors of accepted papers register and pay (the conference's own site); in the acceptance email. */
+    registrationUrl: text('registration_url'),
+    /** Where participants without a paper register (Standard, Student, Co-author). */
+    participantRegistrationUrl: text('participant_registration_url'),
+    registrationDeadline: date('registration_deadline'),
+    /** ISO 4217 code of every amount recorded in the conference (e.g. INR, USD). */
+    currency: text(),
     logoPath: text('logo_path'),
     status: conferenceStatus().notNull().default('pending_approval'),
     adminNote: text('admin_note'),
@@ -73,6 +80,10 @@ export const conferences = pgTable(
     check(
       'conferences_dates_check',
       sql`${t.endDate} is null or ${t.startDate} is null or ${t.endDate} >= ${t.startDate}`,
+    ),
+    check(
+      'conferences_currency_check',
+      sql`${t.currency} is null or ${t.currency} ~ '^[A-Z]{3}$'`,
     ),
   ],
 );

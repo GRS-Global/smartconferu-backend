@@ -5,11 +5,31 @@ import type {
   SubmissionAccess,
 } from '../../core/rbac/access-rules.js';
 import type {
+  PaperParticipantResponse,
+  PaymentResponse,
   RegistrationResponse,
   SubmissionResponse,
   SubmissionView,
 } from './dto/submission.dto.js';
-import type { PaperBundle } from './submissions.repository.js';
+import type {
+  PaperBundle,
+  ParticipantRow,
+  RegistrationRow,
+} from './submissions.repository.js';
+
+type PaymentRow = Pick<
+  RegistrationRow | ParticipantRow,
+  | 'payment'
+  | 'amount'
+  | 'method'
+  | 'paidOn'
+  | 'transactionRef'
+  | 'payerName'
+  | 'receiptPath'
+  | 'receiptName'
+  | 'receiptSize'
+  | 'receiptUploadedAt'
+>;
 
 /** Outcomes that are stages of a paper, not decisions. */
 export const STAGE_OUTCOMES = [
@@ -44,13 +64,79 @@ function registrationOf(
       )
     : undefined;
   return {
-    payment: r?.payment ?? 'not_paid',
+    ...paymentOf(r, bundle.currency),
     attendance: r?.attendance ?? null,
     presenterEmail,
     presenterName: presenter?.name ?? null,
     note: view === 'chair' ? (r?.note ?? null) : null,
     updatedAt: iso(r?.updatedAt ?? null),
   };
+}
+
+/** The fields of PaymentResponse as a plain object type, so it can be spread into a response. */
+type PaymentFields = { [K in keyof PaymentResponse]: PaymentResponse[K] };
+
+/** The payment part of a registration or a participant (a missing row: not paid). */
+export function paymentOf(
+  row: PaymentRow | null,
+  currency: string | null,
+): PaymentFields {
+  return {
+    payment: row?.payment ?? 'not_paid',
+    amount: row?.amount ?? null,
+    currency,
+    method: row?.method ?? null,
+    paidOn: row?.paidOn ?? null,
+    transactionRef: row?.transactionRef ?? null,
+    payerName: row?.payerName ?? null,
+    receipt:
+      row?.receiptPath && row.receiptName
+        ? {
+            fileName: row.receiptName,
+            sizeBytes: row.receiptSize,
+            uploadedAt: iso(row.receiptUploadedAt),
+          }
+        : null,
+  };
+}
+
+/**
+ * The paper's co-authors registered as participants: chairs see them all while the paper is
+ * accepted; an author sees only their own (an author line linked to their account with that
+ * email) once told the paper is accepted.
+ */
+function participantsOf(
+  bundle: PaperBundle,
+  view: SubmissionView,
+  userId: string,
+): PaperParticipantResponse[] {
+  const { submission: s, authors } = bundle;
+  if (s.status === 'withdrawn') return [];
+  if (view === 'chair') {
+    if (!ACCEPTED_OUTCOMES.includes(s.outcome)) return [];
+  } else if (
+    view !== 'author' ||
+    s.notifiedOutcome === null ||
+    !ACCEPTED_OUTCOMES.includes(s.notifiedOutcome)
+  ) {
+    return [];
+  }
+  const mine = new Set(
+    authors
+      .filter((a) => a.userId === userId)
+      .map((a) => a.email.toLowerCase()),
+  );
+  return bundle.participants
+    .filter((p) => view === 'chair' || mine.has(p.email.toLowerCase()))
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      email: p.email,
+      attendance: p.attendance,
+      ...paymentOf(p, bundle.currency),
+      note: view === 'chair' ? p.note : null,
+      updatedAt: p.updatedAt.toISOString(),
+    }));
 }
 
 /** "ISBM 2026-27" → "ISBM": the prefix of a conference's paper ids. */
@@ -215,6 +301,7 @@ export function toSubmission(
     })),
     fixRequest: view === 'reviewer' ? null : fixRequestOf(details),
     registration: registrationOf(bundle, view),
+    participants: participantsOf(bundle, view, userId),
     withdrawnAt: iso(s.withdrawnAt),
     withdrawnBy: s.withdrawnBy,
     submittedAt: s.submittedAt.toISOString(),

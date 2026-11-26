@@ -9,7 +9,9 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -18,6 +20,9 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { IsJsonObjectOfSize } from '../../../core/validation/validators.js';
+import { PAYMENT_METHODS, type PaymentMethod } from '../payment.js';
+
+export { PAYMENT_METHODS, type PaymentMethod };
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -255,12 +260,63 @@ export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export const ATTENDANCE_MODES = ['physical', 'virtual'] as const;
 export type AttendanceMode = (typeof ATTENDANCE_MODES)[number];
 
-/** An accepted paper's registration, as the chair records it. Every field is sent each time. */
-export class SaveRegistrationDto {
+/**
+ * A registration fee as the chair records it. The details are filled in only when the fee is
+ * paid (the amount then is required, in the conference's currency); send null otherwise.
+ */
+export class PaymentFieldsDto {
   @ApiProperty({ enum: PAYMENT_STATUSES })
   @IsIn(PAYMENT_STATUSES)
   payment: PaymentStatus;
 
+  @ApiProperty({
+    nullable: true,
+    type: Number,
+    example: 250,
+    description:
+      "Amount paid, in the conference's currency (2 decimals at most).",
+  })
+  @IsOptional()
+  @IsNumber(
+    { allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 },
+    { message: 'amount must be a number with at most 2 decimals' },
+  )
+  amount: number | null;
+
+  @ApiProperty({ enum: PAYMENT_METHODS, nullable: true, type: String })
+  @IsOptional()
+  @IsIn(PAYMENT_METHODS)
+  method: PaymentMethod | null;
+
+  @ApiProperty({ nullable: true, type: String, example: '2026-11-20' })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsISO8601({ strict: true }, { message: 'paidOn must be a date' })
+  @MaxLength(10)
+  paidOn: string | null;
+
+  @ApiProperty({ nullable: true, type: String, maxLength: 200 })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(200)
+  transactionRef: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    maxLength: 200,
+    description: 'Who paid, as on the receipt.',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(200)
+  payerName: string | null;
+}
+
+/** An accepted paper's registration, as the chair records it. Every field is sent each time. */
+export class SaveRegistrationDto extends PaymentFieldsDto {
   @ApiProperty({
     enum: ATTENDANCE_MODES,
     nullable: true,
@@ -296,8 +352,49 @@ export class SaveRegistrationDto {
 
 // Responses ---------------------------------------------------------------------------------
 
-export class RegistrationResponse {
+export class ReceiptResponse {
+  @ApiProperty() fileName: string;
+  @ApiProperty({ nullable: true, type: Number }) sizeBytes: number | null;
+  @ApiProperty({ nullable: true, type: String }) uploadedAt: string | null;
+}
+
+/** A registration fee and how it was paid (shared by papers and participants). */
+export class PaymentResponse {
   @ApiProperty({ enum: PAYMENT_STATUSES }) payment: PaymentStatus;
+  @ApiProperty({ nullable: true, type: Number }) amount: number | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    example: 'INR',
+    description: "The conference's currency (null while it isn't set).",
+  })
+  currency: string | null;
+  @ApiProperty({ enum: PAYMENT_METHODS, nullable: true, type: String })
+  method: PaymentMethod | null;
+  @ApiProperty({ nullable: true, type: String }) paidOn: string | null;
+  @ApiProperty({ nullable: true, type: String }) transactionRef: string | null;
+  @ApiProperty({ nullable: true, type: String }) payerName: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: ReceiptResponse,
+    description: 'The receipt the chair uploaded, if any.',
+  })
+  receipt: ReceiptResponse | null;
+}
+
+/** A co-author of the paper registered as a participant, with their own payment. */
+export class PaperParticipantResponse extends PaymentResponse {
+  @ApiProperty({ format: 'uuid' }) id: string;
+  @ApiProperty() name: string;
+  @ApiProperty() email: string;
+  @ApiProperty({ enum: ATTENDANCE_MODES, nullable: true, type: String })
+  attendance: AttendanceMode | null;
+  @ApiProperty({ nullable: true, type: String, description: 'Chairs only.' })
+  note: string | null;
+  @ApiProperty() updatedAt: string;
+}
+
+export class RegistrationResponse extends PaymentResponse {
   @ApiProperty({ enum: ATTENDANCE_MODES, nullable: true, type: String })
   attendance: AttendanceMode | null;
   @ApiProperty({ nullable: true, type: String }) presenterEmail: string | null;
@@ -415,6 +512,12 @@ export class SubmissionResponse {
       'Payment and attendance of an accepted paper: chairs once it is accepted, authors once they were told it is. null otherwise.',
   })
   registration: RegistrationResponse | null;
+  @ApiProperty({
+    type: [PaperParticipantResponse],
+    description:
+      'Co-authors registered as participants for this paper: chairs see them all while it is accepted, an author only their own (once told it is accepted).',
+  })
+  participants: PaperParticipantResponse[];
   @ApiProperty({ nullable: true, type: String }) withdrawnAt: string | null;
   @ApiProperty({ nullable: true, enum: ['author', 'chair'], type: String })
   withdrawnBy: string | null;

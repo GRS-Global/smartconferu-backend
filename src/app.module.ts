@@ -32,6 +32,7 @@ import { JobsModule } from './modules/jobs/jobs.module.js';
 import { BellModule } from './modules/notifications/notifications.module.js';
 import { ReviewsModule } from './modules/reviews/reviews.module.js';
 import { SubmissionsModule } from './modules/submissions/submissions.module.js';
+import { RegistrationsModule } from './modules/registrations/registrations.module.js';
 import { FilesModule } from './modules/files/files.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 
@@ -106,6 +107,7 @@ const REQUEST_ID = /^[\w.-]{1,128}$/;
     FilesModule,
     ConferencesModule,
     SubmissionsModule,
+    RegistrationsModule,
     ReviewsModule,
     CommunicationsModule,
     BellModule,

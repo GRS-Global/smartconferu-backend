@@ -141,6 +141,13 @@
       "when": 1795523267541,
       "tag": "0019_paper-registration",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795682988408,
+      "tag": "0020_registration-payments",
+      "breakpoints": true
     }
   ]
 }

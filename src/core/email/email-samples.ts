@@ -80,6 +80,7 @@ export const EMAIL_SAMPLE_VALUES: Readonly<Record<string, string>> = {
   reviews_for_author:
     'Reviewer 1: Clear methodology and well-structured results.<br>Reviewer 2: Please expand the related-work section.',
   registration_deadline: 'Nov 15, 2026',
+  registration_link: 'https://conference.example.org/register',
   camera_ready_deadline: 'Nov 20, 2026',
   revision_deadline: 'Nov 5, 2026',
   final_decision_date: 'Nov 12, 2026',

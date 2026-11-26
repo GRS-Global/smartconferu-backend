@@ -53,17 +53,57 @@ const ATTENDANCE: Record<string, string> = {
   physical: 'Physical',
   virtual: 'Virtual',
 };
-/** "Paid · Physical · ana@uni.edu" from a recorded registration. */
-const registrationText = (v: unknown) => {
-  const r = (typeof v === 'object' && v ? v : {}) as Data;
+const METHODS: Record<string, string> = {
+  bank_transfer: 'Bank transfer',
+  online: 'Online',
+  card: 'Card',
+  cash: 'Cash',
+  other: 'Other',
+};
+const CATEGORIES: Record<string, string> = {
+  standard: 'Standard',
+  student: 'Student',
+  co_author: 'Co-author',
+};
+const asData = (v: unknown) => (typeof v === 'object' && v ? v : {}) as Data;
+/** "Paid 2500.00 INR by Bank transfer" from the payment fields of an entry. */
+const paymentText = (r: Data, currency: unknown) => {
+  const status = PAYMENTS[text(r.payment)];
+  if (!status) return '';
+  const amount =
+    typeof r.amount === 'number'
+      ? ` ${r.amount.toFixed(2)}${text(currency) ? ` ${text(currency)}` : ''}`
+      : '';
+  const method = METHODS[text(r.method)];
+  return `${status}${amount}${method ? ` by ${method}` : ''}`;
+};
+/** "Paid 2500.00 INR by Card · Physical · ana@uni.edu" from a recorded registration. */
+const registrationText = (v: unknown, currency: unknown) => {
+  const r = asData(v);
   return [
-    PAYMENTS[text(r.payment)],
+    paymentText(r, currency),
     ATTENDANCE[text(r.attendance)] ?? 'Attendance not known',
     text(r.presenterEmail),
   ]
     .filter(Boolean)
     .join(' · ');
 };
+/** "Student · Paid 1000.00 INR by Online · Virtual" from a participant entry. */
+const participantText = (v: unknown, currency: unknown) => {
+  const r = asData(v);
+  return [
+    CATEGORIES[text(r.category)],
+    text(r.paperId),
+    paymentText(r, currency),
+    ATTENDANCE[text(r.attendance)],
+  ]
+    .filter(Boolean)
+    .join(' · ');
+};
+/** "Ana Ruiz (ana@uni.edu)" */
+const participantName = (d: Data) =>
+  text(d.email) ? `${text(d.name)} (${text(d.email)})` : text(d.name);
+const num = (v: unknown) => (typeof v === 'number' ? v : 0);
 const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
@@ -152,9 +192,59 @@ const SHOWN: Record<
   'submission.registration_updated': (d, f, s) => ({
     module: 'Registration',
     action: 'Updated',
-    description: `Recorded payment and attendance for ${f.paper(s)}.`,
-    previousValue: registrationText(d.before) || undefined,
-    newValue: registrationText(d.after) || undefined,
+    description: `Recorded payment and attendance for ${f.paper(s)}${d.source === 'import' ? ' (import)' : ''}.`,
+    previousValue: registrationText(d.before, d.currency) || undefined,
+    newValue: registrationText(d.after, d.currency) || undefined,
+  }),
+  'submission.registration_receipt_uploaded': (d, f, s) => ({
+    module: 'Registration',
+    action: 'Updated',
+    description: `${text(d.replaced) ? 'Replaced' : 'Uploaded'} the payment receipt of ${f.paper(s)}.`,
+    previousValue: text(d.replaced) || undefined,
+    newValue: text(d.fileName) || undefined,
+  }),
+  'submission.registration_receipt_removed': (d, f, s) => ({
+    module: 'Registration',
+    action: 'Deleted',
+    description: `Removed the payment receipt of ${f.paper(s)}.`,
+    previousValue: text(d.fileName) || undefined,
+  }),
+  'participant.created': (d) => ({
+    module: 'Participants',
+    action: 'Created',
+    description: `Added participant ${participantName(d)}${d.source === 'import' ? ' (import)' : ''}.`,
+    newValue: participantText(d, d.currency) || undefined,
+  }),
+  'participant.updated': (d) => ({
+    module: 'Participants',
+    action: 'Updated',
+    description: `Updated participant ${participantName(d)}${d.source === 'import' ? ' (import)' : ''}.`,
+    previousValue: participantText(d.before, d.currency) || undefined,
+    newValue: participantText(d, d.currency) || undefined,
+  }),
+  'participant.deleted': (d) => ({
+    module: 'Participants',
+    action: 'Deleted',
+    description: `Removed participant ${participantName(d)}.`,
+    previousValue: participantText(d, d.currency) || undefined,
+  }),
+  'participant.receipt_uploaded': (d) => ({
+    module: 'Participants',
+    action: 'Updated',
+    description: `${text(d.replaced) ? 'Replaced' : 'Uploaded'} the payment receipt of ${text(d.name)}.`,
+    previousValue: text(d.replaced) || undefined,
+    newValue: text(d.fileName) || undefined,
+  }),
+  'participant.receipt_removed': (d) => ({
+    module: 'Participants',
+    action: 'Deleted',
+    description: `Removed the payment receipt of ${text(d.name)}.`,
+    previousValue: text(d.fileName) || undefined,
+  }),
+  'conference.registrations_imported': (d) => ({
+    module: d.kind === 'participants' ? 'Participants' : 'Registration',
+    action: 'Imported',
+    description: `Imported ${d.kind === 'participants' ? 'participants' : 'paper payments'}: ${num(d.new)} new, ${num(d.update)} updated, ${num(d.unchanged)} unchanged.`,
   }),
   'conference.decision_types_updated': () => ({
     module: 'Decision',
@@ -442,7 +532,11 @@ export class ActivityService {
           eq(auditLog.entityId, conferenceId),
         ),
         and(
-          inArray(auditLog.entityType, ['conference_member', 'review']),
+          inArray(auditLog.entityType, [
+            'conference_member',
+            'review',
+            'conference_participant',
+          ]),
           eq(sql`${auditLog.data}->>'conferenceId'`, conferenceId),
         ),
         paperIds.length

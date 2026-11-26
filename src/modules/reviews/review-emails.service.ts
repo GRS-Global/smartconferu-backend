@@ -314,6 +314,8 @@ export class ReviewEmailsService {
       reviewers: readonly Person[];
       cameraReadyDeadline: Date | null;
       notificationDate: string | null;
+      registrationUrl: string | null;
+      registrationDeadline: string | null;
     },
   ): Promise<TemplateEmail[]> {
     const template = sent.changed
@@ -345,7 +347,11 @@ export class ReviewEmailsService {
           (r, i) => `Reviewer ${i + 1}: ${multiline(r.commentsToAuthor ?? '')}`,
         )
         .join('<br>'),
-      registration_deadline: 'the registration deadline on the conference page',
+      registration_deadline:
+        emailDate(sent.registrationDeadline) ||
+        'the registration deadline on the conference page',
+      registration_link:
+        sent.registrationUrl ?? 'the registration page of the conference',
       camera_ready_deadline:
         emailDate(sent.cameraReadyDeadline) ||
         'the date shown on the conference page',
