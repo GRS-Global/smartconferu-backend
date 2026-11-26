@@ -5,6 +5,7 @@ import type {
   SubmissionAccess,
 } from '../../core/rbac/access-rules.js';
 import type {
+  RegistrationResponse,
   SubmissionResponse,
   SubmissionView,
 } from './dto/submission.dto.js';
@@ -16,6 +17,41 @@ export const STAGE_OUTCOMES = [
   'no_decision',
   'plagiarism_clear',
 ];
+
+/** Decisions that make a paper accepted: payment and attendance apply to these. */
+export const ACCEPTED_OUTCOMES: readonly string[] = ['accept', 'registered'];
+
+/**
+ * An accepted paper's payment and attendance: the chair sees it once the paper is accepted, an
+ * author once they were told so; nobody sees it on a paper that isn't (or is no longer) accepted.
+ */
+function registrationOf(
+  bundle: PaperBundle,
+  view: SubmissionView,
+): RegistrationResponse | null {
+  const { submission: s, registration: r, authors } = bundle;
+  const accepted =
+    view === 'chair'
+      ? ACCEPTED_OUTCOMES.includes(s.outcome)
+      : view === 'author' &&
+        s.notifiedOutcome !== null &&
+        ACCEPTED_OUTCOMES.includes(s.notifiedOutcome);
+  if (!accepted || s.status === 'withdrawn') return null;
+  const presenterEmail = r?.presenterEmail ?? null;
+  const presenter = presenterEmail
+    ? authors.find(
+        (a) => a.email.toLowerCase() === presenterEmail.toLowerCase(),
+      )
+    : undefined;
+  return {
+    payment: r?.payment ?? 'not_paid',
+    attendance: r?.attendance ?? null,
+    presenterEmail,
+    presenterName: presenter?.name ?? null,
+    note: view === 'chair' ? (r?.note ?? null) : null,
+    updatedAt: iso(r?.updatedAt ?? null),
+  };
+}
 
 /** "ISBM 2026-27" → "ISBM": the prefix of a conference's paper ids. */
 export function paperPrefix(acronym: string): string {
@@ -178,6 +214,7 @@ export function toSubmission(
           : null,
     })),
     fixRequest: view === 'reviewer' ? null : fixRequestOf(details),
+    registration: registrationOf(bundle, view),
     withdrawnAt: iso(s.withdrawnAt),
     withdrawnBy: s.withdrawnBy,
     submittedAt: s.submittedAt.toISOString(),

@@ -13,7 +13,13 @@ import {
 } from 'drizzle-orm/pg-core';
 import { timestamptz, updatedAt } from './columns.js';
 import { conferences, decisionTypes, tracks } from './conferences.js';
-import { decisionOutcome, fileKind, submissionStatus } from './enums.js';
+import {
+  attendanceMode,
+  decisionOutcome,
+  fileKind,
+  paymentStatus,
+  submissionStatus,
+} from './enums.js';
 import { users } from './identity.js';
 
 export const submissions = pgTable(
@@ -101,6 +107,27 @@ export const submissionAuthors = pgTable(
     index('submission_authors_email_idx').on(sql`lower(${t.email})`),
   ],
 );
+
+/**
+ * An accepted paper's registration, recorded by hand by a chair: whether its fee is paid, whether
+ * it is presented in person or online, and who presents it. One row per paper, created on the
+ * first change; a paper without a row is "not paid", attendance not known yet. The presenter is
+ * kept by email, so editing the author list never loses it.
+ */
+export const submissionRegistrations = pgTable('submission_registrations', {
+  submissionId: uuid('submission_id')
+    .primaryKey()
+    .references(() => submissions.id, { onDelete: 'cascade' }),
+  payment: paymentStatus().notNull().default('not_paid'),
+  attendance: attendanceMode(),
+  presenterEmail: text('presenter_email'),
+  /** The chair's own note (receipt number, amount...). Never shown to authors. */
+  note: text(),
+  updatedBy: uuid('updated_by').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  updatedAt: updatedAt(),
+});
 
 export const submissionFiles = pgTable(
   'submission_files',

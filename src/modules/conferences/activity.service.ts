@@ -44,6 +44,26 @@ const OUTCOMES: Record<string, string> = {
   no_decision: 'No decision',
 };
 const text = (v: unknown) => (typeof v === 'string' ? v : '');
+const PAYMENTS: Record<string, string> = {
+  not_paid: 'Not paid',
+  paid: 'Paid',
+  waived: 'Waived',
+};
+const ATTENDANCE: Record<string, string> = {
+  physical: 'Physical',
+  virtual: 'Virtual',
+};
+/** "Paid · Physical · ana@uni.edu" from a recorded registration. */
+const registrationText = (v: unknown) => {
+  const r = (typeof v === 'object' && v ? v : {}) as Data;
+  return [
+    PAYMENTS[text(r.payment)],
+    ATTENDANCE[text(r.attendance)] ?? 'Attendance not known',
+    text(r.presenterEmail),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+};
 const count = (v: unknown) => (Array.isArray(v) ? v.length : 0);
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
@@ -128,6 +148,13 @@ const SHOWN: Record<
     action: 'Sent',
     description: `Sent the decision of ${f.paper(s)} to its authors.`,
     newValue: OUTCOMES[text(d.outcome)] ?? undefined,
+  }),
+  'submission.registration_updated': (d, f, s) => ({
+    module: 'Registration',
+    action: 'Updated',
+    description: `Recorded payment and attendance for ${f.paper(s)}.`,
+    previousValue: registrationText(d.before) || undefined,
+    newValue: registrationText(d.after) || undefined,
   }),
   'conference.decision_types_updated': () => ({
     module: 'Decision',

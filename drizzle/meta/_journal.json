@@ -138,43 +138,50 @@
     {
       "idx": 19,
       "version": "7",
-      "when": 1795500103167,
-      "tag": "0019_certificates",
+      "when": 1795523267541,
+      "tag": "0019_paper-registration",
       "breakpoints": true
     },
     {
       "idx": 20,
       "version": "7",
-      "when": 1795510752922,
-      "tag": "0020_certificate_assets",
+      "when": 1795523300000,
+      "tag": "0020_certificates",
       "breakpoints": true
     },
     {
       "idx": 21,
       "version": "7",
-      "when": 1795583826780,
-      "tag": "0021_certificate_revoke",
+      "when": 1795523400000,
+      "tag": "0021_certificate_assets",
       "breakpoints": true
     },
     {
       "idx": 22,
       "version": "7",
-      "when": 1795602090578,
-      "tag": "0022_conference_request_cancel",
+      "when": 1795583826780,
+      "tag": "0022_certificate_revoke",
       "breakpoints": true
     },
     {
       "idx": 23,
       "version": "7",
-      "when": 1795606470892,
-      "tag": "0023_conference_decision_emails",
+      "when": 1795602090578,
+      "tag": "0023_conference_request_cancel",
       "breakpoints": true
     },
     {
       "idx": 24,
       "version": "7",
+      "when": 1795606470892,
+      "tag": "0024_conference_decision_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
       "when": 1795677294849,
-      "tag": "0024_submission_alert_paper_number",
+      "tag": "0025_submission_alert_paper_number",
       "breakpoints": true
     }
   ]

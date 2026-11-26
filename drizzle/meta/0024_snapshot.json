@@ -1,6 +1,6 @@
 {
-  "id": "34c4829f-da1c-40a0-b85f-d6e889891f3d",
-  "prevId": "487546db-4a6e-4275-945d-cd7e5a763087",
+  "id": "487546db-4a6e-4275-945d-cd7e5a763087",
+  "prevId": "ae7b38d8-8ddc-487d-bc60-ced823719311",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -6038,6 +6038,92 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.submission_registrations": {
+      "name": "submission_registrations",
+      "schema": "",
+      "columns": {
+        "submission_id": {
+          "name": "submission_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "payment": {
+          "name": "payment",
+          "type": "payment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_paid'"
+        },
+        "attendance": {
+          "name": "attendance",
+          "type": "attendance_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "presenter_email": {
+          "name": "presenter_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_registrations_submission_id_submissions_id_fk": {
+          "name": "submission_registrations_submission_id_submissions_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "submission_registrations_updated_by_users_id_fk": {
+          "name": "submission_registrations_updated_by_users_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -6182,6 +6268,23 @@
       "values": [
         "active",
         "disabled"
+      ]
+    },
+    "public.attendance_mode": {
+      "name": "attendance_mode",
+      "schema": "public",
+      "values": [
+        "physical",
+        "virtual"
+      ]
+    },
+    "public.payment_status": {
+      "name": "payment_status",
+      "schema": "public",
+      "values": [
+        "not_paid",
+        "paid",
+        "waived"
       ]
     }
   },

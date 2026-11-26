@@ -1,6 +1,6 @@
 {
-  "id": "2dd6ac15-1ebc-44e9-865e-76a9eaa7bf45",
-  "prevId": "8bb4f43b-01a1-45dc-ba55-979e3605bf7b",
+  "id": "8bb4f43b-01a1-45dc-ba55-979e3605bf7b",
+  "prevId": "7ea1e51f-d922-4e3d-b53b-5708ed63f393",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5240,119 +5240,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.certificate_assets": {
-      "name": "certificate_assets",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conference_id": {
-          "name": "conference_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_path": {
-          "name": "storage_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "certificate_assets_conference_idx": {
-          "name": "certificate_assets_conference_idx",
-          "columns": [
-            {
-              "expression": "conference_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "certificate_assets_conference_id_conferences_id_fk": {
-          "name": "certificate_assets_conference_id_conferences_id_fk",
-          "tableFrom": "certificate_assets",
-          "tableTo": "conferences",
-          "columnsFrom": [
-            "conference_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "certificate_assets_created_by_users_id_fk": {
-          "name": "certificate_assets_created_by_users_id_fk",
-          "tableFrom": "certificate_assets",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.certificate_designs": {
       "name": "certificate_designs",
       "schema": "",
@@ -5995,6 +5882,92 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.submission_registrations": {
+      "name": "submission_registrations",
+      "schema": "",
+      "columns": {
+        "submission_id": {
+          "name": "submission_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "payment": {
+          "name": "payment",
+          "type": "payment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_paid'"
+        },
+        "attendance": {
+          "name": "attendance",
+          "type": "attendance_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "presenter_email": {
+          "name": "presenter_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_registrations_submission_id_submissions_id_fk": {
+          "name": "submission_registrations_submission_id_submissions_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "submission_registrations_updated_by_users_id_fk": {
+          "name": "submission_registrations_updated_by_users_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -6138,6 +6111,23 @@
       "values": [
         "active",
         "disabled"
+      ]
+    },
+    "public.attendance_mode": {
+      "name": "attendance_mode",
+      "schema": "public",
+      "values": [
+        "physical",
+        "virtual"
+      ]
+    },
+    "public.payment_status": {
+      "name": "payment_status",
+      "schema": "public",
+      "values": [
+        "not_paid",
+        "paid",
+        "waived"
       ]
     }
   },

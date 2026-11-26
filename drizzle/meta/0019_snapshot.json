@@ -1,5 +1,5 @@
 {
-  "id": "8bb4f43b-01a1-45dc-ba55-979e3605bf7b",
+  "id": "7ea1e51f-d922-4e3d-b53b-5708ed63f393",
   "prevId": "f882943d-40ca-4461-9bcd-dca50a696de8",
   "version": "7",
   "dialect": "postgresql",
@@ -2230,6 +2230,92 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.submission_registrations": {
+      "name": "submission_registrations",
+      "schema": "",
+      "columns": {
+        "submission_id": {
+          "name": "submission_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "payment": {
+          "name": "payment",
+          "type": "payment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_paid'"
+        },
+        "attendance": {
+          "name": "attendance",
+          "type": "attendance_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "presenter_email": {
+          "name": "presenter_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_registrations_submission_id_submissions_id_fk": {
+          "name": "submission_registrations_submission_id_submissions_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "submission_registrations_updated_by_users_id_fk": {
+          "name": "submission_registrations_updated_by_users_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -5239,649 +5325,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.certificate_designs": {
-      "name": "certificate_designs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conference_id": {
-          "name": "conference_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type_key": {
-          "name": "type_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "design": {
-          "name": "design",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "certificate_designs_conference_idx": {
-          "name": "certificate_designs_conference_idx",
-          "columns": [
-            {
-              "expression": "conference_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "certificate_designs_conference_id_conferences_id_fk": {
-          "name": "certificate_designs_conference_id_conferences_id_fk",
-          "tableFrom": "certificate_designs",
-          "tableTo": "conferences",
-          "columnsFrom": [
-            "conference_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "certificate_designs_created_by_users_id_fk": {
-          "name": "certificate_designs_created_by_users_id_fk",
-          "tableFrom": "certificate_designs",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.certificate_distributions": {
-      "name": "certificate_distributions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conference_id": {
-          "name": "conference_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "design_id": {
-          "name": "design_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "audience": {
-          "name": "audience",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "email": {
-          "name": "email",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "manual": {
-          "name": "manual",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        },
-        "overrides": {
-          "name": "overrides",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "certificate_distributions_conference_idx": {
-          "name": "certificate_distributions_conference_idx",
-          "columns": [
-            {
-              "expression": "conference_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "certificate_distributions_design_idx": {
-          "name": "certificate_distributions_design_idx",
-          "columns": [
-            {
-              "expression": "design_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "certificate_distributions_conference_id_conferences_id_fk": {
-          "name": "certificate_distributions_conference_id_conferences_id_fk",
-          "tableFrom": "certificate_distributions",
-          "tableTo": "conferences",
-          "columnsFrom": [
-            "conference_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "certificate_distributions_design_id_certificate_designs_id_fk": {
-          "name": "certificate_distributions_design_id_certificate_designs_id_fk",
-          "tableFrom": "certificate_distributions",
-          "tableTo": "certificate_designs",
-          "columnsFrom": [
-            "design_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "certificate_distributions_created_by_users_id_fk": {
-          "name": "certificate_distributions_created_by_users_id_fk",
-          "tableFrom": "certificate_distributions",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "certificate_distributions_status_check": {
-          "name": "certificate_distributions_status_check",
-          "value": "\"certificate_distributions\".\"status\" in ('draft', 'sent')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.certificate_signatures": {
-      "name": "certificate_signatures",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conference_id": {
-          "name": "conference_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "designation": {
-          "name": "designation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "institution": {
-          "name": "institution",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "storage_path": {
-          "name": "storage_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_default": {
-          "name": "is_default",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "certificate_signatures_conference_idx": {
-          "name": "certificate_signatures_conference_idx",
-          "columns": [
-            {
-              "expression": "conference_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "certificate_signatures_one_default": {
-          "name": "certificate_signatures_one_default",
-          "columns": [
-            {
-              "expression": "conference_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"certificate_signatures\".\"is_default\"",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "certificate_signatures_conference_id_conferences_id_fk": {
-          "name": "certificate_signatures_conference_id_conferences_id_fk",
-          "tableFrom": "certificate_signatures",
-          "tableTo": "conferences",
-          "columnsFrom": [
-            "conference_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "certificate_signatures_created_by_users_id_fk": {
-          "name": "certificate_signatures_created_by_users_id_fk",
-          "tableFrom": "certificate_signatures",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.issued_certificates": {
-      "name": "issued_certificates",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conference_id": {
-          "name": "conference_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "distribution_id": {
-          "name": "distribution_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "serial": {
-          "name": "serial",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "email": {
-          "name": "email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "affiliation": {
-          "name": "affiliation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "role_label": {
-          "name": "role_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "paper_label": {
-          "name": "paper_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "paper_title": {
-          "name": "paper_title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "issued_at": {
-          "name": "issued_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'sent'"
-        },
-        "bounce_reason": {
-          "name": "bounce_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "opened": {
-          "name": "opened",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "downloaded": {
-          "name": "downloaded",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "verified_count": {
-          "name": "verified_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        }
-      },
-      "indexes": {
-        "issued_certificates_serial_unique": {
-          "name": "issued_certificates_serial_unique",
-          "columns": [
-            {
-              "expression": "serial",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "issued_certificates_conference_idx": {
-          "name": "issued_certificates_conference_idx",
-          "columns": [
-            {
-              "expression": "conference_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "issued_certificates_distribution_idx": {
-          "name": "issued_certificates_distribution_idx",
-          "columns": [
-            {
-              "expression": "distribution_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "issued_certificates_email_idx": {
-          "name": "issued_certificates_email_idx",
-          "columns": [
-            {
-              "expression": "lower(\"email\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "issued_certificates_conference_id_conferences_id_fk": {
-          "name": "issued_certificates_conference_id_conferences_id_fk",
-          "tableFrom": "issued_certificates",
-          "tableTo": "conferences",
-          "columnsFrom": [
-            "conference_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "issued_certificates_distribution_id_certificate_distributions_id_fk": {
-          "name": "issued_certificates_distribution_id_certificate_distributions_id_fk",
-          "tableFrom": "issued_certificates",
-          "tableTo": "certificate_distributions",
-          "columnsFrom": [
-            "distribution_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "issued_certificates_status_check": {
-          "name": "issued_certificates_status_check",
-          "value": "\"issued_certificates\".\"status\" in ('sent', 'bounced')"
-        }
-      },
-      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -5894,6 +5337,14 @@
         "declined",
         "submitted",
         "removed"
+      ]
+    },
+    "public.attendance_mode": {
+      "name": "attendance_mode",
+      "schema": "public",
+      "values": [
+        "physical",
+        "virtual"
       ]
     },
     "public.auth_provider": {
@@ -5991,6 +5442,15 @@
         "active",
         "declined",
         "removed"
+      ]
+    },
+    "public.payment_status": {
+      "name": "payment_status",
+      "schema": "public",
+      "values": [
+        "not_paid",
+        "paid",
+        "waived"
       ]
     },
     "public.review_mode": {

@@ -1,6 +1,6 @@
 {
-  "id": "75001b5d-f74d-4382-bc7a-e8af881b3c0f",
-  "prevId": "2dd6ac15-1ebc-44e9-865e-76a9eaa7bf45",
+  "id": "2dd6ac15-1ebc-44e9-865e-76a9eaa7bf45",
+  "prevId": "8bb4f43b-01a1-45dc-ba55-979e3605bf7b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5893,36 +5893,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoke_reason": {
-          "name": "revoke_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoked_by": {
-          "name": "revoked_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "replaced_by": {
-          "name": "replaced_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resent_at": {
-          "name": "resent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -6013,19 +5983,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "issued_certificates_revoked_by_users_id_fk": {
-          "name": "issued_certificates_revoked_by_users_id_fk",
-          "tableFrom": "issued_certificates",
-          "tableTo": "users",
-          "columnsFrom": [
-            "revoked_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6037,6 +5994,92 @@
           "value": "\"issued_certificates\".\"status\" in ('sent', 'bounced')"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.submission_registrations": {
+      "name": "submission_registrations",
+      "schema": "",
+      "columns": {
+        "submission_id": {
+          "name": "submission_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "payment": {
+          "name": "payment",
+          "type": "payment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_paid'"
+        },
+        "attendance": {
+          "name": "attendance",
+          "type": "attendance_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "presenter_email": {
+          "name": "presenter_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_registrations_submission_id_submissions_id_fk": {
+          "name": "submission_registrations_submission_id_submissions_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "submission_registrations_updated_by_users_id_fk": {
+          "name": "submission_registrations_updated_by_users_id_fk",
+          "tableFrom": "submission_registrations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },
@@ -6181,6 +6224,23 @@
       "values": [
         "active",
         "disabled"
+      ]
+    },
+    "public.attendance_mode": {
+      "name": "attendance_mode",
+      "schema": "public",
+      "values": [
+        "physical",
+        "virtual"
+      ]
+    },
+    "public.payment_status": {
+      "name": "payment_status",
+      "schema": "public",
+      "values": [
+        "not_paid",
+        "paid",
+        "waived"
       ]
     }
   },
