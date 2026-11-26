@@ -131,6 +131,10 @@ export class UsersService {
       conferences: rows.map((c) => ({
         ...c,
         reviewDeadline: c.reviewDeadline?.toISOString() ?? null,
+        submissionDeadline: c.submissionDeadline?.toISOString() ?? null,
+        abstractDeadline: /^\d{4}-\d{2}-\d{2}$/.test(c.abstractDeadline ?? '')
+          ? c.abstractDeadline
+          : null,
         roles: [...(roles.get(c.conferenceId) ?? [])],
       })),
       authorPapers: authored.filter((p) => shown.has(p.conferenceId)),

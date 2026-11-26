@@ -67,6 +67,18 @@ const SIGN_IN_RESPONSE = {
   },
 };
 
+/**
+ * Refresh and sign-out run on every page load of the web app, so they get the app-wide limit
+ * (RATE_LIMIT_PER_MINUTE) instead of the strict one below: otherwise a few reloads in a minute, or
+ * many people behind one university / office IP, sign people out.
+ */
+const SESSION_LIMIT = {
+  default: {
+    limit: () => Number(process.env.RATE_LIMIT_PER_MINUTE) || 300,
+    ttl: 60_000,
+  },
+};
+
 @ApiTags('auth')
 @ApiExtraModels(SessionResponse, MfaRequiredResponse)
 @Controller('auth')
@@ -236,6 +248,7 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
+  @Throttle(SESSION_LIMIT)
   @HttpCode(HttpStatus.OK)
   @ApiCookieAuth(REFRESH_COOKIE)
   @ApiOperation({ summary: 'Get a new access token using the refresh cookie' })
@@ -259,6 +272,7 @@ export class AuthController {
 
   @Public()
   @Post('sign-out')
+  @Throttle(SESSION_LIMIT)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiCookieAuth(REFRESH_COOKIE)
   @ApiOperation({ summary: 'End this session' })

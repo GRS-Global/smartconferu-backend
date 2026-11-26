@@ -260,6 +260,10 @@ export class UsersRepository {
         startDate: conferences.startDate,
         endDate: conferences.endDate,
         reviewDeadline: conferences.reviewDeadline,
+        submissionDeadline: conferences.submissionDeadline,
+        abstractDeadline: sql<
+          string | null
+        >`${conferences.details}->>'abstractDeadline'`,
       })
       .from(conferences)
       .where(

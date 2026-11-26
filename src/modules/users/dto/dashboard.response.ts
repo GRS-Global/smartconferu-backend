@@ -17,6 +17,15 @@ export class DashboardConferenceResponse {
   endDate: string | null;
   @ApiProperty({ nullable: true, type: String, format: 'date-time' })
   reviewDeadline: string | null;
+  @ApiProperty({ nullable: true, type: String, format: 'date-time' })
+  submissionDeadline: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    example: '2027-02-15',
+    description: 'From conferences.details.abstractDeadline (YYYY-MM-DD).',
+  })
+  abstractDeadline: string | null;
   @ApiProperty({
     isArray: true,
     enum: ['author', 'chair', 'track_chair', 'cfp_manager', 'reviewer'],
