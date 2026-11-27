@@ -9,6 +9,18 @@ export const emailsTo = (userEmail: string) =>
     eq(emailLog.status, 'sent'),
   );
 
+/** Unread notifications only (no emails): the Super Admin console, whose list has no Emails tab. */
+export async function countUnreadNotifications(
+  db: Executor,
+  userId: string,
+): Promise<number> {
+  const [n] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(notifications)
+    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+  return n?.count ?? 0;
+}
+
 /**
  * The bell's number: unread notifications plus unread emails sent to the user's address. The bell,
  * the Notifications page and the live-events stream all use this, so they always agree.
@@ -17,10 +29,7 @@ export async function countUnread(
   db: Executor,
   userId: string,
 ): Promise<number> {
-  const [n] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(notifications)
-    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+  const n = { count: await countUnreadNotifications(db, userId) };
   const [me] = await db
     .select({ email: users.email })
     .from(users)

@@ -39,6 +39,7 @@ import { paperId } from '../submissions/submission.mapper.js';
 import { toNotificationView } from '../../core/notifications/notification.view.js';
 import {
   countUnread,
+  countUnreadNotifications,
   emailsTo,
 } from '../../core/notifications/unread-count.js';
 import {
@@ -122,6 +123,11 @@ export class NotificationPage {
       'How many are not read yet: all notifications plus the emails sent to me (the bell).',
   })
   unread: number;
+  @ApiProperty({
+    description:
+      'Unread notifications only, without emails (the Super Admin console, which lists no emails).',
+  })
+  unreadNotifications: number;
 }
 
 export class MyEmailResponse {
@@ -222,6 +228,10 @@ export class BellService {
       })),
       nextCursor: result.nextCursor,
       unread: await this.unread(user),
+      unreadNotifications: await countUnreadNotifications(
+        this.database.db,
+        user.id,
+      ),
     };
   }
 
