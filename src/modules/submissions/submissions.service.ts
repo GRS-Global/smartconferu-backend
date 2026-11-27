@@ -121,7 +121,14 @@ export class SubmissionsService {
           'Only a chair of this conference can submit on behalf of an author.',
         );
       }
+      // A chair submitting for an author is not held by the Call for Papers or its deadline, and works in an archived conference too.
+      if (onBehalf && !rules.canSubmitOnBehalf(access)) {
+        throw AppException.businessRule(
+          "This conference isn't approved, so no paper can be added to it.",
+        );
+      }
       if (
+        !onBehalf &&
         !rules.canSubmit(access, {
           cfpStatus: info.cfpStatus,
           submissionDeadline: info.submissionDeadline,

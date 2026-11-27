@@ -548,7 +548,8 @@ export class ConferencesService {
    */
   async submissionForm(slug: string): Promise<SubmissionFormResponse> {
     const row = await this.conferences.findBySlug(this.database.db, slug);
-    if (row?.status !== 'active') {
+    // Archived too: a chair can still add a paper on an author's behalf there (the author's own form says it is closed).
+    if (row?.status !== 'active' && row?.status !== 'archived') {
       throw AppException.notFound('The conference');
     }
     const settings = (row.settings ?? {}) as Record<string, unknown>;

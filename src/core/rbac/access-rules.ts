@@ -234,6 +234,19 @@ export function canSubmit(
 }
 
 /**
+ * A chair submitting a paper on an author's behalf: always possible in a conference that was approved —
+ * live or archived — whatever its Call for Papers status or submission deadline (late or missed papers,
+ * papers collected by email, papers added after the event). Never in one that is waiting, refused,
+ * cancelled or deleted.
+ */
+export function canSubmitOnBehalf(access: ConferenceAccess): boolean {
+  return (
+    isChair(access) &&
+    (access.status === 'active' || access.status === 'archived')
+  );
+}
+
+/**
  * Whether a team member can be given a paper to review: active reviewers get a normal assignment,
  * invited ones a pending assignment that starts when they accept, anyone else none.
  * Replaces the checks in: assignments: chairs manage, pending assignments: chairs manage.

@@ -213,7 +213,7 @@ describe('Submissions, screening and the email queue', () => {
       expect(second.body.paperId).toBe('ICX-2');
     });
 
-    it('refuses everyone, chairs included, while the CFP is not published', async () => {
+    it('refuses authors while the CFP is not published; a chair may still submit on their behalf', async () => {
       const chair = await person();
       const author = await person();
       const conferenceId = await openConference(chair, { publish: false });
@@ -224,12 +224,71 @@ describe('Submissions, screening and the email queue', () => {
         .post(`/conferences/${conferenceId}/submissions`, body)
         .expect(422);
       expect(refused.body.message).toMatch(/Call for Papers isn't published/);
+      // A chair's own paper (not on anyone's behalf) still waits for the CFP.
+      await as(chair.token)
+        .post(`/conferences/${conferenceId}/submissions`, body)
+        .expect(422);
       await as(chair.token)
         .post(`/conferences/${conferenceId}/submissions`, {
           ...body,
           onBehalf: true,
         })
-        .expect(422);
+        .expect(201);
+    });
+
+    it('lets a chair submit on behalf in an archived conference with a closed CFP, but not in one never approved', async () => {
+      const chair = await person({ firstName: 'Carla', lastName: 'Chair' });
+      const author = await person();
+      const conferenceId = await openConference(chair, {
+        deadline: '2020-01-01T00:00:00Z',
+      });
+      await as(chair.token)
+        .post(`/conferences/${conferenceId}/cfp/close`)
+        .expect(200);
+      await as(chair.token)
+        .post(`/conferences/${conferenceId}/archive`)
+        .expect(200);
+      const body = paper([
+        { name: 'Ada', email: author.email, corresponding: true },
+      ]);
+      // The author cannot, the chair on their behalf can.
+      await as(author.token)
+        .post(`/conferences/${conferenceId}/submissions`, body)
+        .expect((r) => expect([404, 422]).toContain(r.status));
+      const behalf = await as(chair.token)
+        .post(`/conferences/${conferenceId}/submissions`, {
+          ...body,
+          onBehalf: true,
+        })
+        .expect(201);
+      expect(behalf.body).toMatchObject({ view: 'chair' });
+      // The form (tracks, types) of an archived conference is still there for that.
+      const slug = (
+        await t.db.query<{ slug: string }>(
+          'select slug from conferences where id = $1',
+          [conferenceId],
+        )
+      ).rows[0].slug;
+      await http()
+        .get(api(`/public/conferences/${slug}/submission-form`))
+        .expect(200);
+
+      // A conference still waiting for approval takes no paper, not even from its chair.
+      const waiting = await as(chair.token)
+        .post('/conferences', {
+          acronym: 'WAIT 2027',
+          title: 'Waiting Conference 2027',
+          startDate: '2027-06-01',
+          endDate: '2027-06-03',
+        })
+        .expect(201);
+      const no = await as(chair.token)
+        .post(`/conferences/${waiting.body.id}/submissions`, {
+          ...body,
+          onBehalf: true,
+        })
+        .expect((r) => expect([404, 422]).toContain(r.status));
+      expect(no.status).not.toBe(201);
     });
 
     it('closes for authors at the deadline; a chair may still submit on their behalf', async () => {
