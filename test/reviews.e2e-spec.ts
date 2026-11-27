@@ -152,7 +152,15 @@ describe('Peer review and decisions', () => {
     recommendation: 'accept',
     commentsToAuthor: 'Clear and convincing.',
     commentsToChair: 'Strong paper.',
-    answers: { 'f-originality': 'high' },
+    answers: {
+      'f-summary': 'A clear paper.',
+      'f-originality': 4,
+      'f-technical': 4,
+      'f-clarity': 4,
+      'f-relevance': 4,
+      'f-score': 4,
+      'f-confidence': 'High',
+    },
   };
 
   describe('assigning', () => {
@@ -401,6 +409,26 @@ describe('Peer review and decisions', () => {
         .put(`/assignments/${s.assignmentId}/review`, { ...form, submit: true })
         .expect(422);
       expect(locked.body.message).toMatch(/already has a decision/);
+    });
+
+    it('refuses to send a review that leaves required questions unanswered', async () => {
+      const s = await assigned();
+      const res = await as(s.reviewer.token)
+        .put(`/assignments/${s.assignmentId}/review`, {
+          ...form,
+          answers: { 'f-summary': '  ' },
+          submit: true,
+        })
+        .expect(400);
+      expect(res.body.message).toMatch(/required question/);
+      // A draft with the same gaps is fine.
+      await as(s.reviewer.token)
+        .put(`/assignments/${s.assignmentId}/review`, {
+          ...form,
+          answers: {},
+          submit: false,
+        })
+        .expect(200);
     });
 
     it("gives the reviewer the conference's own review form and instructions, and the decision only once it was sent", async () => {

@@ -117,6 +117,18 @@ describe('License requests and Activity Logs', () => {
         .post(url, { requestedDate: '2099-02-01' })
         .expect(409);
       expect(await bells(s.admin.id, 'license_request')).toBe(1);
+      // The Super Admin gets an email as well as the bell.
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .filter(
+            (m) =>
+              m.to === s.admin.email &&
+              /License extension requested/.test(m.subject),
+          ),
+      ).toHaveLength(1);
+      t.outbox().length = 0;
       const latest = await as(s.chair.token).get(url).expect(200);
       expect(latest.body.status).toBe('pending');
 
@@ -146,6 +158,13 @@ describe('License requests and Activity Logs', () => {
         })
         .expect(204);
       expect(await bells(s.chair.id, 'license_decision')).toBe(1);
+      await t.sendQueuedEmails();
+      const declinedMail = t.outbox().find((m) => m.to === s.chair.email);
+      expect(declinedMail?.subject).toMatch(
+        /license extension of ICX 2027 was not approved/,
+      );
+      expect(declinedMail?.text).toMatch(/Not yet./);
+      t.outbox().length = 0;
       const declined = await as(s.chair.token).get(url).expect(200);
       expect(declined.body).toMatchObject({
         status: 'declined',
@@ -178,6 +197,10 @@ describe('License requests and Activity Logs', () => {
         .expect(200);
       expect(conference.body.details.licenseExpiry).toBe('2099-02-15');
       expect(await bells(s.chair.id, 'license_decision')).toBe(2);
+      await t.sendQueuedEmails();
+      const approvedMail = t.outbox().find((m) => m.to === s.chair.email);
+      expect(approvedMail?.subject).toMatch(/license of ICX 2027 was extended/);
+      expect(approvedMail?.text).toMatch(/2099-02-15/);
 
       // The next request has to start after the new license end.
       await as(s.chair.token)

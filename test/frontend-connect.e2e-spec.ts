@@ -47,10 +47,13 @@ describe('Frontend connection helpers', () => {
         .send(body ?? {}),
   });
 
-  async function openConference(chair: { token: string }) {
+  async function openConference(
+    chair: { token: string },
+    acronym = 'ICX 2027',
+  ) {
     const created = await as(chair.token)
       .post('/conferences', {
-        acronym: 'ICX 2027',
+        acronym,
         title: 'International Conference X 2027',
         startDate: '2027-06-01',
         endDate: '2027-06-03',
@@ -598,7 +601,7 @@ describe('Frontend connection helpers', () => {
     it('moves papers to another track and deletes them, for chairs of that conference only', async () => {
       const { chair, author, conf, paper } = await setup();
       const stranger = await person();
-      const otherConf = await openConference(stranger);
+      const otherConf = await openConference(stranger, 'OTHR 2027');
       const track = (token: string, body: object) =>
         send('patch', token, `/conferences/${conf.id}/submissions/track`, body);
       await track(author.token, {

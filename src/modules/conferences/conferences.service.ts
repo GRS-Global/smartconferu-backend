@@ -32,7 +32,10 @@ import type {
   SubmissionFormResponse,
   UpdateConferenceDto,
 } from './dto/conference.dto.js';
-import type { DirectoryEntryResponse } from './dto/cfp.dto.js';
+import type {
+  DirectoryEntryResponse,
+  PublicCfpPageResponse,
+} from './dto/cfp.dto.js';
 
 /** "ISBM 2027-28" → "isbm202728": the URL id of a conference. */
 export function slugFromAcronym(acronym: string): string {
@@ -68,6 +71,11 @@ export class ConferencesService {
     this.assertDateOrder(dto.startDate, dto.endDate);
     this.assertNotInPast(dto.startDate, dto.endDate);
     const id = await this.database.transaction(async (tx) => {
+      if (await this.conferences.acronymTaken(tx, dto.acronym)) {
+        throw AppException.conflict(
+          `A conference with the acronym "${dto.acronym}" already exists. Add the year or another word to yours so the paper numbers do not clash.`,
+        );
+      }
       const slug = await this.freeSlug(tx, dto.acronym);
       const conference = await this.conferences.create(tx, {
         slug,
@@ -476,6 +484,45 @@ export class ConferencesService {
       details: row.details as Record<string, unknown>,
       publishedAt: row.publishedAt?.toISOString() ?? null,
     }));
+  }
+
+  /**
+   * A Call for Papers by the page address its chair chose (the page authors visit at /cfp/<page>). Only the published or closed CFP
+   * of an approved conference has one; anything else is not found.
+   */
+  async cfpPage(page: string): Promise<PublicCfpPageResponse> {
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(page)) {
+      throw AppException.notFound('The Call for Papers');
+    }
+    const found = await this.conferences.findByCfpPage(this.database.db, page);
+    if (!found) {
+      throw AppException.notFound('The Call for Papers');
+    }
+    const { conference: c } = found;
+    const text = (v: unknown) => (typeof v === 'string' ? v : '');
+    const content = (found.content ?? {}) as Record<string, unknown>;
+    const theme = (found.theme ?? {}) as Record<string, unknown>;
+    const details = (c.details ?? {}) as Record<string, unknown>;
+    return {
+      slug: c.slug,
+      acronym: c.acronym,
+      title: c.title,
+      status: found.cfpStatus === 'closed' ? 'closed' : 'published',
+      venue: c.venue,
+      city: c.city,
+      country: c.country,
+      webPage: c.webPage,
+      contactEmail: c.contactEmail,
+      about: c.about,
+      topics: Array.isArray(details.topics)
+        ? details.topics.filter((t): t is string => typeof t === 'string')
+        : [],
+      startDate: c.startDate,
+      endDate: c.endDate,
+      submissionDeadline: c.submissionDeadline?.toISOString() ?? null,
+      doc: text(content.doc),
+      themeId: text(theme.id) || 'classic',
+    };
   }
 
   /**

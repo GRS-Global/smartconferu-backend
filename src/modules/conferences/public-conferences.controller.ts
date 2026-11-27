@@ -8,7 +8,10 @@ import {
 } from '@nestjs/swagger';
 import { Public } from '../../core/auth/auth.decorators.js';
 import { ConferencesService } from './conferences.service.js';
-import { DirectoryEntryResponse } from './dto/cfp.dto.js';
+import {
+  DirectoryEntryResponse,
+  PublicCfpPageResponse,
+} from './dto/cfp.dto.js';
 import {
   ArchivedConferenceNotice,
   PublicConferenceResponse,
@@ -30,6 +33,16 @@ export class PublicConferencesController {
   @ApiOkResponse({ type: [DirectoryEntryResponse] })
   directory(): Promise<DirectoryEntryResponse[]> {
     return this.conferences.directory();
+  }
+
+  @Get('cfp-pages/:page')
+  @ApiOperation({
+    summary:
+      'A published (or closed) Call for Papers by the page address its chair chose; what visitors see at /cfp/<page>',
+  })
+  @ApiOkResponse({ type: PublicCfpPageResponse })
+  cfpPage(@Param('page') page: string): Promise<PublicCfpPageResponse> {
+    return this.conferences.cfpPage(page);
   }
 
   @Get('conferences/:slug')

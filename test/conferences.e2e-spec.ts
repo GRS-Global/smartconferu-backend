@@ -69,9 +69,12 @@ describe('Conferences, CFP and team', () => {
   };
 
   /** A conference requested by `chair` and approved by a super admin. */
-  async function liveConference(chair: { token: string }) {
+  async function liveConference(
+    chair: { token: string },
+    acronym = request_.acronym,
+  ) {
     const created = await as(chair.token)
-      .post('/conferences', request_)
+      .post('/conferences', { ...request_, acronym })
       .expect(201);
     const admin = await superAdmin();
     await as(admin.token)
@@ -121,13 +124,36 @@ describe('Conferences, CFP and team', () => {
       ]);
     });
 
-    it('gives a taken acronym the next free URL id', async () => {
+    it("refuses an acronym another waiting, live or archived conference already has, but not a declined or deleted one's", async () => {
       const chair = await person();
-      await as(chair.token).post('/conferences', request_).expect(201);
-      const second = await as(chair.token)
+      const admin = await superAdmin();
+      const first = await as(chair.token)
         .post('/conferences', request_)
         .expect(201);
-      expect(second.body.slug).toBe('isbm2027-2');
+      // Waiting for approval: already taken, however it is typed.
+      for (const acronym of ['ISBM 2027', 'isbm2027', 'ISBM-2027']) {
+        const refused = await as(chair.token)
+          .post('/conferences', { ...request_, acronym })
+          .expect(409);
+        expect(refused.body.message).toMatch(/already exists/);
+      }
+      // Another year of the same series is a different acronym.
+      const next = await as(chair.token)
+        .post('/conferences', { ...request_, acronym: 'ISBM 2028' })
+        .expect(201);
+      expect(next.body.slug).toBe('isbm2028');
+      // Live: still taken.
+      await as(admin.token)
+        .post(`/admin/conferences/${first.body.id}/decision`, { approve: true })
+        .expect(204);
+      await as(chair.token).post('/conferences', request_).expect(409);
+      // Declined: free again.
+      await as(admin.token)
+        .post(`/admin/conferences/${next.body.id}/decision`, { approve: false })
+        .expect(204);
+      await as(chair.token)
+        .post('/conferences', { ...request_, acronym: 'ISBM 2028' })
+        .expect(201);
     });
 
     it('validates the request', async () => {
@@ -160,11 +186,19 @@ describe('Conferences, CFP and team', () => {
         expect(res.body.code).toBe('VALIDATION_FAILED');
       }
       const ok = await as(chair.token)
-        .post('/conferences', { ...request_, webPage: 'https://example.org/x' })
+        .post('/conferences', {
+          ...request_,
+          acronym: 'WEB 2027',
+          webPage: 'https://example.org/x',
+        })
         .expect(201);
       expect(ok.body.webPage).toBe('https://example.org/x');
       const blank = await as(chair.token)
-        .post('/conferences', { ...request_, webPage: '   ' })
+        .post('/conferences', {
+          ...request_,
+          acronym: 'WEB 2028',
+          webPage: '   ',
+        })
         .expect(201);
       expect(blank.body.webPage).toBeNull();
     });
@@ -443,6 +477,65 @@ describe('Conferences, CFP and team', () => {
       expect(reopened.body.status).toBe('published');
     });
 
+    it('has a public page at the address its chair chose, once it is approved', async () => {
+      const chair = await person();
+      const id = await liveConference(chair);
+      const admin = await superAdmin();
+      await as(chair.token)
+        .patch(`/conferences/${id}/cfp`, {
+          content: { publicSlug: 'ISBM2027call', doc: '<p>Send us papers</p>' },
+          theme: { id: 'ocean' },
+        })
+        .expect(200);
+      await as(chair.token).post(`/conferences/${id}/cfp/publish`).expect(200);
+      // Waiting for approval: no public page yet.
+      await http().get(api('/public/cfp-pages/ISBM2027call')).expect(404);
+
+      await as(admin.token)
+        .post(`/admin/conferences/${id}/cfp/decision`, { approve: true })
+        .expect(204);
+      // Found by the chosen address, with or without the same capital letters; no login needed.
+      for (const address of ['ISBM2027call', 'isbm2027CALL']) {
+        const found = await http()
+          .get(api(`/public/cfp-pages/${address}`))
+          .expect(200);
+        expect(found.body).toMatchObject({
+          slug: 'isbm2027',
+          status: 'published',
+          doc: '<p>Send us papers</p>',
+          themeId: 'ocean',
+        });
+        expect(found.body.settings).toBeUndefined();
+      }
+      await http().get(api('/public/cfp-pages/nothing-here1')).expect(404);
+      await http().get(api('/public/cfp-pages/bad.address')).expect(404);
+
+      // Two Calls for Papers cannot share one address.
+      const other = await person();
+      const created = await as(other.token)
+        .post('/conferences', { ...request_, acronym: 'OTHR 2027' })
+        .expect(201);
+      await as(admin.token)
+        .post(`/admin/conferences/${created.body.id}/decision`, {
+          approve: true,
+        })
+        .expect(204);
+      const otherId = created.body.id as string;
+      const clash = await as(other.token)
+        .patch(`/conferences/${otherId}/cfp`, {
+          content: { publicSlug: 'isbm2027CALL' },
+        })
+        .expect(409);
+      expect(clash.body.message).toMatch(/already used/);
+
+      // A closed Call for Papers still has its page, marked closed.
+      await as(chair.token).post(`/conferences/${id}/cfp/close`).expect(200);
+      const closed = await http()
+        .get(api('/public/cfp-pages/ISBM2027call'))
+        .expect(200);
+      expect(closed.body.status).toBe('closed');
+    });
+
     it('can be declined with a note, edited and sent again; the chairs are told each time', async () => {
       const chair = await person();
       const id = await liveConference(chair);
@@ -535,7 +628,7 @@ describe('Conferences, CFP and team', () => {
         .expect(403);
       await as(chair.token).get('/admin/cfps').expect(403);
       const admin = await superAdmin();
-      const other = await liveConference(await person());
+      const other = await liveConference(await person(), 'OTHER 2027');
       // A CFP that was never sent cannot be decided.
       await as(admin.token)
         .post(`/admin/conferences/${other}/cfp/decision`, { approve: true })

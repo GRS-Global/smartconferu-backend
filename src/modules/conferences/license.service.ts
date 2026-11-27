@@ -15,6 +15,7 @@ import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import { canManageConference } from '../../core/rbac/access-rules.js';
 import { AccessService } from '../../core/rbac/access.service.js';
+import { ConferenceEmailsService } from './conference-emails.service.js';
 import type {
   AdminLicenseRequestResponse,
   LicenseRequestResponse,
@@ -71,6 +72,7 @@ export class LicenseService {
     private readonly access: AccessService,
     private readonly notifications: NotificationsService,
     private readonly audit: AuditService,
+    private readonly emails: ConferenceEmailsService,
   ) {}
 
   private async requireChair(tx: Tx, user: AuthUser, conferenceId: string) {
@@ -174,6 +176,13 @@ export class LicenseService {
         body: `Until ${dto.requestedDate}${dto.reason ? ` — ${dto.reason}` : ''}`,
         conferenceId,
       });
+      await this.emails.licenseRequested(
+        tx,
+        await this.emails.facts(tx, conferenceId),
+        user.id,
+        dto.requestedDate,
+        dto.reason ?? null,
+      );
       await this.audit.record(
         {
           action: 'conference.license_requested',
@@ -371,6 +380,14 @@ export class LicenseService {
           : 'License extension not approved',
         body: approve ? conference.acronym : (reason ?? conference.acronym),
       });
+      await this.emails.licenseDecided(
+        tx,
+        await this.emails.facts(tx, request.conferenceId),
+        approve,
+        until,
+        reason ?? null,
+        admin.id,
+      );
       await this.audit.record(
         {
           action: approve

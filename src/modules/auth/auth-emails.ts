@@ -141,6 +141,23 @@ export const accountAlreadyExists = (
     footnote: "If this wasn't you, you can ignore this email.",
   });
 
+/** Someone signed in elsewhere asked to use this address for their own account; it already belongs to this one, so nothing changed. */
+export const emailChangeToExisting = (
+  to: string,
+  signInUrl: string,
+  resetUrl: string,
+): EmailMessage =>
+  renderEmail({
+    to,
+    subject: 'Someone tried to use your email address',
+    heading: 'Someone tried to use your email address',
+    paragraphs: [
+      `A Smartconferu member asked to change their sign-in email to ${to}. That address already belongs to your account, so nothing was changed.`,
+      `If it was you, sign in at ${signInUrl}. If you've forgotten your password, you can reset it at ${resetUrl}.`,
+    ],
+    footnote: "If you don't know why you received this, you can ignore it.",
+  });
+
 export const resetPassword = (to: string, url: string): EmailMessage =>
   renderEmail({
     to,

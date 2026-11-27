@@ -135,6 +135,15 @@ describe('Background jobs', () => {
     await as(sam.token)
       .put(`/assignments/${samAssignment.id}/review`, {
         score: 4,
+        answers: {
+          'f-summary': 'Fine.',
+          'f-originality': 4,
+          'f-technical': 4,
+          'f-clarity': 4,
+          'f-relevance': 4,
+          'f-score': 4,
+          'f-confidence': 'High',
+        },
         submit: true,
       })
       .expect(200);

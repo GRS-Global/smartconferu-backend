@@ -89,14 +89,31 @@ export class AccountService {
       throw AppException.validation('That is already your email address.');
     }
     const owner = await this.accounts.findByEmail(address);
+    if (owner && !this.canMerge(user)) {
+      // Answered like a new address (registration does the same), so this form can't be used to find out who has an account;
+      // the person who owns the address is told instead.
+      await this.email.sendQuietly(
+        emails.emailChangeToExisting(
+          address,
+          `${this.appUrl}/login`,
+          `${this.appUrl}/forgot-password`,
+        ),
+      );
+      await this.audit.record({
+        action: 'auth.email_change_existing',
+        actorId: user.id,
+        client,
+        data: { to: address },
+      });
+      return;
+    }
     if (owner) {
+      // Only a sign-in without an email gets here (it can be connected to the account instead).
       throw new AppException(
         HttpStatus.CONFLICT,
         ErrorCode.AUTH_EMAIL_IN_USE,
-        this.canMerge(user)
-          ? 'That address already has an account. You can connect this sign-in to it instead.'
-          : 'That address is already used by another account.',
-        { canMerge: this.canMerge(user) },
+        'That address already has an account. You can connect this sign-in to it instead.',
+        { canMerge: true },
       );
     }
 

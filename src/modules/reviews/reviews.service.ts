@@ -69,6 +69,17 @@ function reviewValues(dto: ReviewFieldsDto) {
   };
 }
 
+/** What the app's default review form asks for, used when a conference has not made its own. */
+const DEFAULT_REQUIRED_ANSWERS = [
+  { id: 'f-summary', label: 'Review of the submission' },
+  { id: 'f-originality', label: 'Originality' },
+  { id: 'f-technical', label: 'Technical quality' },
+  { id: 'f-clarity', label: 'Clarity & presentation' },
+  { id: 'f-relevance', label: 'Relevance to conference scope' },
+  { id: 'f-score', label: 'Overall recommendation' },
+  { id: 'f-confidence', label: 'Reviewer confidence' },
+];
+
 const endOfDay = (date: string | null | undefined) =>
   date ? new Date(`${date}T23:59:59Z`) : null;
 
@@ -1097,6 +1108,56 @@ export class ReviewsService {
    * The first time it is sent the assignment is done and the thank-you, chair and "ready for
    * decision" emails go out.
    */
+  /**
+   * A review is sent only with every required question of the conference's review form answered
+   * (the app's own form refuses it too; the API must not take less). The default form is used when
+   * the conference has none of its own.
+   */
+  private async requireRequiredAnswers(
+    executor: Executor,
+    conferenceId: string,
+    answers: Record<string, unknown>,
+  ): Promise<void> {
+    const [conference] = await executor
+      .select({ settings: conferences.settings })
+      .from(conferences)
+      .where(eq(conferences.id, conferenceId));
+    const form = obj(obj(conference?.settings).reviewForm);
+    const required: { id: string; label: string }[] = Array.isArray(
+      form.sections,
+    )
+      ? form.sections.flatMap((s: unknown) => {
+          const fields = obj(s).fields;
+          return Array.isArray(fields)
+            ? fields
+                .map((f) => obj(f))
+                .filter((f) => f.required === true && typeof f.id === 'string')
+                .map((f) => ({
+                  id: f.id as string,
+                  label:
+                    typeof f.label === 'string' ? f.label : (f.id as string),
+                }))
+            : [];
+        })
+      : DEFAULT_REQUIRED_ANSWERS;
+    const answered = (v: unknown) =>
+      Array.isArray(v)
+        ? v.length > 0
+        : typeof v === 'string'
+          ? v.trim() !== ''
+          : typeof v === 'number' || typeof v === 'boolean';
+    const missing = required.filter((f) => !answered(answers[f.id]));
+    if (missing.length) {
+      throw AppException.validation(
+        `Answer every required question before sending: ${missing.map((f) => f.label).join(', ')}.`,
+        missing.map((f) => ({
+          field: `answers.${f.id}`,
+          errors: ['This question is required.'],
+        })),
+      );
+    }
+  }
+
   async saveReview(
     user: AuthUser,
     assignmentId: string,
@@ -1131,6 +1192,13 @@ export class ReviewsService {
                 )
               ? 'This paper is no longer open for your review.'
               : "This review can't be changed any more — the paper already has a decision.",
+        );
+      }
+      if (dto.submit) {
+        await this.requireRequiredAnswers(
+          tx,
+          access.conference.conferenceId,
+          dto.answers ?? {},
         );
       }
       const firstSubmit = dto.submit && existing?.status !== 'submitted';

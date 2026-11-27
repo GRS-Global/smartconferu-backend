@@ -169,6 +169,69 @@ export class ConferenceEmailsService {
     });
   }
 
+  /** A chair asked for a license extension → the Super Admins (as the Call for Papers and deletion requests do). */
+  async licenseRequested(
+    executor: Executor,
+    conference: ConferenceFacts,
+    requesterId: string,
+    requestedDate: string,
+    reason: string | null,
+  ): Promise<void> {
+    const requester = await this.one(executor, requesterId);
+    const admins = await this.recipients.superAdmins(executor);
+    const review = this.recipients.link('/super-admin/license-requests');
+    const emails = admins.map((admin): WrittenEmail => ({
+      key: 'licenseRequestAdmin',
+      label: 'License extension requested',
+      recipientType: 'Super Admin',
+      to: admin,
+      subject: `License extension requested: ${conference.acronym}`,
+      body:
+        `<p>Hi ${escapeHtml(firstName(admin.name, admin.email))},</p>` +
+        `<p>${escapeHtml(requester?.name ?? 'A chair')} (${escapeHtml(requester?.email ?? '')}) asked to extend the license of <b>${escapeHtml(conference.acronym)}</b> — ${escapeHtml(conference.title)} until <b>${escapeHtml(requestedDate)}</b>.</p>` +
+        (reason ? `<p>Reason: “${escapeHtml(reason)}”</p>` : '') +
+        `<p>Decide in the Super Admin console: <a href="${escapeHtml(review)}" style="color:#4F46E5">${escapeHtml(review)}</a></p>`,
+    }));
+    await this.queue.enqueue(executor, 'conference_license_requested', emails, {
+      sentBy: requesterId,
+    });
+  }
+
+  /** A Super Admin decided a license extension → the conference's chairs. */
+  async licenseDecided(
+    executor: Executor,
+    conference: ConferenceFacts,
+    approved: boolean,
+    until: string | null,
+    reason: string | null,
+    adminId: string,
+  ): Promise<void> {
+    const chairs = await this.recipients.chairs(executor, conference.id);
+    const settings = this.recipients.link(
+      appPaths.chairDashboard(conference.slug),
+    );
+    const acronym = escapeHtml(conference.acronym);
+    const emails = chairs.map((chair): WrittenEmail => ({
+      key: approved ? 'licenseApproved' : 'licenseDeclined',
+      label: approved ? 'License extended' : 'License extension not approved',
+      recipientType: 'Chair',
+      conference: this.conference(conference),
+      to: chair,
+      subject: approved
+        ? `The license of ${conference.acronym} was extended`
+        : `The license extension of ${conference.acronym} was not approved`,
+      body:
+        `<p>Dear ${escapeHtml(firstName(chair.name, chair.email))},</p>` +
+        (approved
+          ? `<p>The license of <b>${acronym}</b> now runs until <b>${escapeHtml(until ?? '')}</b>.</p>`
+          : `<p>The request to extend the license of <b>${acronym}</b> was not approved${reason ? `:</p><p>“${escapeHtml(reason)}”</p><p>` : '. '}You can send a new request from Conference Settings.</p>`) +
+        `<p><a href="${escapeHtml(settings)}" style="color:#4F46E5">${escapeHtml(settings)}</a></p>`,
+    }));
+    await this.queue.enqueue(executor, 'conference_license_decided', emails, {
+      sentBy: adminId,
+    });
+  }
+
   /** The platform's text for a decision email: the stored template, else the built-in one. */
   private async decisionTemplate(executor: Executor, key: DecisionTemplateKey) {
     const [row] = await executor

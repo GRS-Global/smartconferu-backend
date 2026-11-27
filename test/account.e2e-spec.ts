@@ -103,18 +103,22 @@ describe('Account: email address and sessions', () => {
       expect(res.body.code).toBe('AUTH_INVALID_CREDENTIALS');
     });
 
-    it('refuses an address that belongs to another account', async () => {
+    it('answers the same for an address that belongs to another account, and warns its owner', async () => {
       await t.createUser({ email: 'taken@example.org' });
       const user = await t.createUser();
       const { bearer } = await signIn(user);
-      const res = await http()
+      const before = t.outbox().length;
+      await http()
         .post('/api/v1/auth/email/change')
         .set('Authorization', bearer)
         .send({ newEmail: 'taken@example.org', currentPassword: user.password })
-        .expect(409);
-      expect(res.body).toMatchObject({
-        code: 'AUTH_EMAIL_IN_USE',
-        details: { canMerge: false },
+        .expect(202);
+      // Same answer as for a free address; no confirmation link is made, the owner is told instead.
+      const sent = t.outbox().slice(before);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toMatchObject({
+        to: 'taken@example.org',
+        subject: 'Someone tried to use your email address',
       });
     });
 

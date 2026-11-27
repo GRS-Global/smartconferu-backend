@@ -88,3 +88,29 @@ export class DirectoryEntryResponse {
   })
   publishedAt: string | null;
 }
+
+/** A published (or closed) Call for Papers as visitors see it at /cfp/<page>. */
+export class PublicCfpPageResponse {
+  @ApiProperty({
+    description:
+      "The conference's URL id (the submission form is /submit/<slug>).",
+  })
+  slug: string;
+  @ApiProperty() acronym: string;
+  @ApiProperty() title: string;
+  @ApiProperty({ enum: ['published', 'closed'] }) status:
+    'published' | 'closed';
+  @ApiProperty({ nullable: true, type: String }) venue: string | null;
+  @ApiProperty({ nullable: true, type: String }) city: string | null;
+  @ApiProperty({ nullable: true, type: String }) country: string | null;
+  @ApiProperty({ nullable: true, type: String }) webPage: string | null;
+  @ApiProperty({ nullable: true, type: String }) contactEmail: string | null;
+  @ApiProperty({ nullable: true, type: String }) about: string | null;
+  @ApiProperty({ type: [String] }) topics: string[];
+  @ApiProperty({ nullable: true, type: String }) startDate: string | null;
+  @ApiProperty({ nullable: true, type: String }) endDate: string | null;
+  @ApiProperty({ nullable: true, type: String, format: 'date-time' })
+  submissionDeadline: string | null;
+  @ApiProperty({ description: "The page's text as HTML." }) doc: string;
+  @ApiProperty({ description: "The look's id (colours)." }) themeId: string;
+}

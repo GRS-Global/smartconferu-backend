@@ -87,7 +87,19 @@ export class CfpsService {
         );
       }
       const values: Partial<CfpRow> = {};
-      if (dto.content !== undefined) values.content = dto.content;
+      if (dto.content !== undefined) {
+        const page = dto.content.publicSlug;
+        if (
+          typeof page === 'string' &&
+          page.trim() !== '' &&
+          (await this.conferences.cfpPageTaken(tx, page.trim(), conferenceId))
+        ) {
+          throw AppException.conflict(
+            'That page address is already used by another Call for Papers. Choose a different one.',
+          );
+        }
+        values.content = dto.content;
+      }
       if (dto.theme !== undefined) values.theme = dto.theme;
       if (Object.keys(values).length === 0) {
         return toCfp(await this.conferences.findCfp(tx, conferenceId));

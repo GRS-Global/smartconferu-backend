@@ -80,7 +80,7 @@ describe('AI features (against a fake Claude and Voyage)', () => {
   ];
 
   /** A conference with one paper (a real text PDF uploaded), and its chair and author. */
-  async function paperWithPdf() {
+  async function paperWithPdf(acronym = 'ICX 2027') {
     const chair = await person();
     const author = await person();
     const admin = await t.createUser();
@@ -93,7 +93,7 @@ describe('AI features (against a fake Claude and Voyage)', () => {
     );
     const created = await as(chair.token)
       .post('/conferences', {
-        acronym: 'ICX 2027',
+        acronym,
         title: 'International Conference X 2027',
         startDate: '2027-06-01',
         endDate: '2027-06-03',
@@ -356,7 +356,7 @@ describe('AI features (against a fake Claude and Voyage)', () => {
       .expect(403);
 
     // A scan has no text to summarise.
-    const scan = await paperWithPdf();
+    const scan = await paperWithPdf('SCAN 2027');
     await t.db.query(
       "update submission_files set file_name = 'paper.docx' where submission_id = $1",
       [scan.submissionId],

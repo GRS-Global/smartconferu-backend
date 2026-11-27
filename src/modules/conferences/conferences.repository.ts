@@ -102,6 +102,32 @@ export class ConferencesRepository {
   }
 
   /**
+   * Whether another conference that is waiting, live or archived already has this acronym, compared by its letters and digits only
+   * ("QAC 2027" = "qac-2027"). Declined, cancelled and deleted ones do not count. Two of them would number their papers alike ("QAC-1").
+   */
+  async acronymTaken(tx: Executor, acronym: string): Promise<boolean> {
+    const key = acronym.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    if (!key) {
+      return false;
+    }
+    const [row] = await tx
+      .select({ id: conferences.id })
+      .from(conferences)
+      .where(
+        and(
+          inArray(conferences.status, [
+            'pending_approval',
+            'active',
+            'archived',
+          ]),
+          sql`lower(regexp_replace(${conferences.acronym}, '[^A-Za-z0-9]', '', 'g')) = ${key}`,
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
+  /**
    * Creates the conference with everything it starts with: the creator as its chair, the default
    * decision labels and an empty CFP.
    */
@@ -252,6 +278,50 @@ export class ConferencesRepository {
         sql`${conferences.submissionDeadline} asc nulls last`,
         asc(conferences.startDate),
       );
+  }
+
+  /**
+   * The conference whose Call for Papers has `page` as its page address (kept in the CFP's content as publicSlug, compared without
+   * regard to case). Only an approved conference with a published or closed CFP has a public page.
+   */
+  async findByCfpPage(tx: Executor, page: string) {
+    const [row] = await tx
+      .select({
+        conference: getTableColumns(conferences),
+        content: cfps.content,
+        theme: cfps.theme,
+        cfpStatus: cfps.status,
+      })
+      .from(conferences)
+      .innerJoin(cfps, eq(cfps.conferenceId, conferences.id))
+      .where(
+        and(
+          eq(conferences.status, 'active'),
+          inArray(cfps.status, ['published', 'closed']),
+          sql`lower(${cfps.content}->>'publicSlug') = ${page.toLowerCase()}`,
+        ),
+      )
+      .limit(1);
+    return row;
+  }
+
+  /** Whether another conference's CFP already uses this page address (any status, without regard to case). */
+  async cfpPageTaken(
+    tx: Executor,
+    page: string,
+    exceptConferenceId: string,
+  ): Promise<boolean> {
+    const [row] = await tx
+      .select({ id: cfps.conferenceId })
+      .from(cfps)
+      .where(
+        and(
+          ne(cfps.conferenceId, exceptConferenceId),
+          sql`lower(${cfps.content}->>'publicSlug') = ${page.toLowerCase()}`,
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
   }
 
   // CFP --------------------------------------------------------------------------------------
