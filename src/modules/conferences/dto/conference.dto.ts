@@ -457,7 +457,7 @@ export class AdminCfpResponse extends AdminConferenceResponse {
   @ApiProperty({
     nullable: true,
     type: String,
-    description: 'The page the chair chose: smartconferu.com/cfp/<cfpPage>.',
+    description: 'The page the chair chose: <APP_URL>/cfp/<cfpPage> (APP_URL = the web app address).',
   })
   cfpPage: string | null;
 
