@@ -403,8 +403,8 @@ export class ReviewsService {
         );
       }
       const authors = await this.reviews.authorAccounts(tx, submissionId);
-      const authorEmails = await this.reviews.authorEmails(tx, submissionId);
-      const accountEmails = await this.reviews.accountEmails(
+      const authorPeople = await this.reviews.authorPeople(tx, submissionId);
+      const accounts = await this.reviews.accountPeople(
         tx,
         members.flatMap((m) => (m.userId ? [m.userId] : [])),
       );
@@ -422,15 +422,21 @@ export class ReviewsService {
             `${memberLabel(member)} is an author of this paper, so they can't review it.`,
           );
         }
-        // Same institution as an author (same email domain, webmail ignored): the web app blocks it too.
-        const clash = rules.sameInstitutionAs(
-          (member.userId ? accountEmails.get(member.userId) : null) ??
-            member.invitedEmail,
-          authorEmails,
+        // Same institution as an author (by the institutions they gave; by email domain only when one gave none): the web app blocks it too.
+        const account = member.userId ? accounts.get(member.userId) : undefined;
+        const clash = rules.institutionConflict(
+          {
+            email: account?.email ?? member.invitedEmail,
+            affiliation: account?.affiliation ?? null,
+          },
+          authorPeople,
         );
         if (clash) {
+          const who = clash.author.name || clash.author.email || 'an author';
           throw AppException.businessRule(
-            `${memberLabel(member)} is from the same institution as an author of this paper (${clash}), so they can't review it.`,
+            clash.by === 'institution'
+              ? `${memberLabel(member)} is from the same institution as an author of this paper (${who}, ${clash.author.affiliation}), so they can't review it.`
+              : `${memberLabel(member)} has the same email domain as an author of this paper (${who}, ${clash.author.email}), so they can't review it.`,
           );
         }
         (kind === 'assign' && member.userId ? now : later).push(member);

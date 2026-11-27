@@ -482,6 +482,66 @@ export class ReviewsRepository {
       .filter((e): e is string => Boolean(e));
   }
 
+  /** The paper's authors as the conflict check sees them: every listed author (name, email, typed affiliation) and the submitter (sign-in address, profile affiliation). */
+  async authorPeople(
+    executor: Executor,
+    submissionId: string,
+  ): Promise<
+    { name: string | null; email: string | null; affiliation: string | null }[]
+  > {
+    const listed = await executor
+      .select({
+        name: submissionAuthors.name,
+        email: submissionAuthors.email,
+        affiliation: submissionAuthors.affiliation,
+      })
+      .from(submissionAuthors)
+      .where(eq(submissionAuthors.submissionId, submissionId));
+    const submitter = await executor
+      .select({
+        firstName: profiles.firstName,
+        lastName: profiles.lastName,
+        email: users.email,
+        affiliation: profiles.affiliation,
+      })
+      .from(submissions)
+      .innerJoin(users, eq(users.id, submissions.submitterId))
+      .leftJoin(profiles, eq(profiles.id, submissions.submitterId))
+      .where(eq(submissions.id, submissionId));
+    return [
+      ...listed,
+      ...submitter.map((s) => ({
+        name: [s.firstName, s.lastName].filter(Boolean).join(' ') || null,
+        email: s.email,
+        affiliation: s.affiliation,
+      })),
+    ];
+  }
+
+  /** Sign-in address and profile affiliation of some accounts (the reviewers being assigned). */
+  async accountPeople(
+    executor: Executor,
+    userIds: string[],
+  ): Promise<
+    Map<string, { email: string | null; affiliation: string | null }>
+  > {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+    const rows = await executor
+      .select({
+        id: users.id,
+        email: users.email,
+        affiliation: profiles.affiliation,
+      })
+      .from(users)
+      .leftJoin(profiles, eq(profiles.id, users.id))
+      .where(inArray(users.id, userIds));
+    return new Map(
+      rows.map((r) => [r.id, { email: r.email, affiliation: r.affiliation }]),
+    );
+  }
+
   /** Sign-in addresses of some accounts. */
   async accountEmails(
     executor: Executor,

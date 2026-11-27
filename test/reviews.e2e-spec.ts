@@ -234,7 +234,7 @@ describe('Peer review and decisions', () => {
       expect(res.body.message).toMatch(/author of this paper/);
     });
 
-    it('refuses a reviewer from the same institution as an author (same email domain), but not two webmail users', async () => {
+    it('refuses a reviewer on the same email domain as an author when no institution is known, but not two webmail users', async () => {
       const s = await setup();
       const domain = s.author.email.split('@')[1];
       const colleague = await person({
@@ -255,13 +255,95 @@ describe('Peer review and decisions', () => {
           memberIds: [member.body.member.id],
         })
         .expect(422);
-      expect(res.body.message).toMatch(/same institution/);
+      expect(res.body.message).toMatch(/same email domain/);
       // The reviewer from another institution is still fine.
       await as(s.chair.token)
         .post(`/submissions/${s.submissionId}/assignments`, {
           memberIds: [s.reviewerMember],
         })
         .expect(200);
+    });
+
+    it('compares the institutions people gave: a shared company email domain is not the same institution', async () => {
+      // The reported case: the paper lists two co-authors without an account on the organiser's domain,
+      // each with their own institution; the reviewer is on the same domain but at another institution.
+      const s = await setup();
+      // Rows as in the reported database: co-authors without an account (user_id null), each with the institution typed for them.
+      await t.db.query(
+        `insert into submission_authors (submission_id, position, name, email, affiliation, country, is_corresponding)
+         values ($1, 1, 'Jatin Gohel', 'jatin@gr-conferences.example', 'Navgujarat, Gujarat, India', 'India', false),
+                ($1, 2, 'Shivam Vakil', 'shivam@gr-conferences.example', 'Delhi University, Delhi, India', 'India', false)`,
+        [s.submissionId],
+      );
+      const reviewerAt = async (
+        first: string,
+        email: string,
+        affiliation: string | null,
+        accept: boolean,
+      ) => {
+        const who = await person({
+          firstName: first,
+          lastName: 'Reviewer',
+          email,
+        });
+        await t.db.query('update profiles set affiliation = $2 where id = $1', [
+          who.id,
+          affiliation,
+        ]);
+        const member = await as(s.chair.token)
+          .post(`/conferences/${s.conferenceId}/members`, { email })
+          .expect(201);
+        if (accept) {
+          await as(who.token)
+            .post(`/invitations/${member.body.member.id}/accept`)
+            .expect(200);
+        }
+        return member.body.member.id as string;
+      };
+      const assign = (memberId: string) =>
+        as(s.chair.token).post(`/submissions/${s.submissionId}/assignments`, {
+          memberIds: [memberId],
+        });
+
+      // Same domain, other institution: allowed, while invited (queued) and once active.
+      const gaurav = await reviewerAt(
+        'Gaurav',
+        'gaurav@gr-conferences.example',
+        'ETH Zurich',
+        false,
+      );
+      await assign(gaurav).expect(200);
+      const active = await reviewerAt(
+        'Gita',
+        'gita@gr-conferences.example',
+        'ETH Zurich',
+        true,
+      );
+      await assign(active).expect(200);
+
+      // Same institution as a co-author, typed without the place and on another domain: refused.
+      const priya = await reviewerAt(
+        'Priya',
+        'priya@du.example',
+        'Delhi University',
+        true,
+      );
+      const same = await assign(priya).expect(422);
+      expect(same.body.message).toMatch(
+        /same institution as an author of this paper \(Shivam Vakil, Delhi University, Delhi, India\)/,
+      );
+
+      // No institution on the reviewer's profile: the email domain decides, and says so.
+      const noAff = await reviewerAt(
+        'Nina',
+        'nina@gr-conferences.example',
+        null,
+        true,
+      );
+      const byDomain = await assign(noAff).expect(422);
+      expect(byDomain.body.message).toMatch(
+        /same email domain as an author of this paper \(Jatin Gohel/,
+      );
     });
 
     it('takes a paper back from a reviewer, who is told', async () => {

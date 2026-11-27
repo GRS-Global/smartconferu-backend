@@ -265,24 +265,90 @@ const WEBMAIL_DOMAINS = new Set([
   'rediffmail.com',
 ]);
 
+/** A person the conflict check compares: a reviewer, or one of the paper's authors. */
+export interface ConflictPerson {
+  name?: string | null;
+  email?: string | null;
+  /** The institution they gave (profile affiliation, or the affiliation typed for an author). */
+  affiliation?: string | null;
+}
+
+export interface InstitutionConflict {
+  /** `institution`: both gave the same institution. `email_domain`: one gave none, and the email domains match. */
+  by: 'institution' | 'email_domain';
+  author: ConflictPerson;
+}
+
+/** One part of an institution name, for comparing: case, accents, punctuation, "&" / "and" and a leading "The" do not matter. */
+export function normalizeInstitution(value: string | null | undefined): string {
+  return (value ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/^the /, '');
+}
+
 /**
- * Conflict of interest by institution: the reviewer's email has the same domain as one of the
- * paper's authors (webmail ignored). The web app applies the same rule when a chair picks a
- * reviewer; the API refuses it too. Returns the author email it clashes with, else null.
+ * Whether two institutions people typed are the same one. Typed affiliations often carry the place
+ * ("Delhi University, Delhi, India"), so besides the whole text the name before the first comma
+ * counts: "Delhi University" matches "Delhi University, Delhi, India", and two entries with the same
+ * name and the same last part (the country) match; "University of California, Berkeley" and
+ * "University of California, Los Angeles" do not.
  */
-export function sameInstitutionAs(
-  reviewerEmail: string | null | undefined,
-  authorEmails: readonly string[],
-): string | null {
-  const domain = (reviewerEmail ?? '').toLowerCase().split('@')[1] ?? '';
-  if (!domain || WEBMAIL_DOMAINS.has(domain)) {
-    return null;
-  }
+export function sameInstitution(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const parts = (v: string | null | undefined) =>
+    (v ?? '').split(',').map(normalizeInstitution).filter(Boolean);
+  const pa = parts(a);
+  const pb = parts(b);
+  if (!pa.length || !pb.length) return false;
+  const fa = pa.join(' ');
+  const fb = pb.join(' ');
+  if (fa === fb || fa === pb[0] || fb === pa[0]) return true;
   return (
-    authorEmails.find(
-      (e) => (e.toLowerCase().split('@')[1] ?? '') === domain,
-    ) ?? null
+    pa.length > 1 &&
+    pb.length > 1 &&
+    pa[0] === pb[0] &&
+    pa[pa.length - 1] === pb[pb.length - 1]
   );
+}
+
+const emailDomain = (email: string | null | undefined): string => {
+  const domain = (email ?? '').trim().toLowerCase().split('@')[1] ?? '';
+  return domain && !WEBMAIL_DOMAINS.has(domain) ? domain : '';
+};
+
+/**
+ * Conflict of interest by institution. When the reviewer and an author both gave an institution,
+ * only those are compared: different institutions never clash, even on a shared email domain (a
+ * company or organiser domain is not an institution). Only when one of them gave none does the
+ * email domain decide (webmail ignored). The web app applies the same rule when a chair picks a
+ * reviewer; the API refuses it too. Returns the author it clashes with and why, else null.
+ */
+export function institutionConflict(
+  reviewer: ConflictPerson,
+  authors: readonly ConflictPerson[],
+): InstitutionConflict | null {
+  const mine = normalizeInstitution(reviewer.affiliation);
+  const myDomain = emailDomain(reviewer.email);
+  for (const author of authors) {
+    const theirs = normalizeInstitution(author.affiliation);
+    if (mine && theirs) {
+      if (sameInstitution(reviewer.affiliation, author.affiliation)) {
+        return { by: 'institution', author };
+      }
+      continue;
+    }
+    if (myDomain && emailDomain(author.email) === myDomain) {
+      return { by: 'email_domain', author };
+    }
+  }
+  return null;
 }
 
 // ── Submission ────────────────────────────────────────────────────────────────────────────

@@ -238,16 +238,83 @@ describe('access rules: conference', () => {
 
   it('flags a reviewer from the same institution as an author (same email domain, webmail ignored)', () => {
     const authors = ['Ada@Uni.example.org', 'b@gmail.com'];
-    expect(rules.sameInstitutionAs('rita@uni.example.org', authors)).toBe(
-      'Ada@Uni.example.org',
-    );
+    const people = authors.map((email) => ({ email }));
+    // No institution given by either: the email domain decides.
     expect(
-      rules.sameInstitutionAs('rita@other.example.org', authors),
+      rules.institutionConflict({ email: 'rita@uni.example.org' }, people),
+    ).toEqual({ by: 'email_domain', author: { email: 'Ada@Uni.example.org' } });
+    expect(
+      rules.institutionConflict({ email: 'rita@other.example.org' }, people),
     ).toBeNull();
     // Two people on gmail.com share nothing.
-    expect(rules.sameInstitutionAs('rita@gmail.com', authors)).toBeNull();
-    expect(rules.sameInstitutionAs(null, authors)).toBeNull();
-    expect(rules.sameInstitutionAs('no-at-sign', authors)).toBeNull();
+    expect(
+      rules.institutionConflict({ email: 'rita@gmail.com' }, people),
+    ).toBeNull();
+    expect(rules.institutionConflict({ email: null }, people)).toBeNull();
+    expect(
+      rules.institutionConflict({ email: 'no-at-sign' }, people),
+    ).toBeNull();
+  });
+
+  it('compares the institutions people gave before email domains', () => {
+    const jatin = {
+      name: 'Jatin Gohel',
+      email: 'jatin@gr-conferences.com',
+      affiliation: 'Navgujarat, Gujarat, India',
+    };
+    // Same company domain, different institutions: no conflict (the reported case).
+    expect(
+      rules.institutionConflict(
+        { email: 'gaurav@gr-conferences.com', affiliation: 'ETH Zurich' },
+        [jatin],
+      ),
+    ).toBeNull();
+    // Same institution, written differently, different email domains: conflict.
+    expect(
+      rules.institutionConflict(
+        { email: 'x@gmail.com', affiliation: '  the ETH-Zürich ' },
+        [{ name: 'Ada', email: 'ada@ethz.ch', affiliation: 'ETH Zurich' }],
+      ),
+    ).toMatchObject({ by: 'institution', author: { name: 'Ada' } });
+    expect(
+      rules.institutionConflict({ affiliation: 'Science & Arts College' }, [
+        { affiliation: 'Science and Arts College' },
+      ]),
+    ).toMatchObject({ by: 'institution' });
+    // Typed with the place: the name before the first comma counts.
+    expect(
+      rules.institutionConflict({ affiliation: 'Delhi University' }, [
+        { name: 'Shivam', affiliation: 'Delhi University, Delhi, India' },
+      ]),
+    ).toMatchObject({ by: 'institution', author: { name: 'Shivam' } });
+    expect(
+      rules.sameInstitution(
+        'Delhi University, New Delhi, India',
+        'Delhi University, Delhi, India',
+      ),
+    ).toBe(true);
+    expect(
+      rules.sameInstitution(
+        'University of California, Berkeley',
+        'University of California, Los Angeles',
+      ),
+    ).toBe(false);
+    expect(
+      rules.sameInstitution('ETH Zurich', 'Navgujarat, Gujarat, India'),
+    ).toBe(false);
+    // The reviewer gave no institution: the email domain still decides.
+    expect(
+      rules.institutionConflict({ email: 'gaurav@gr-conferences.com' }, [
+        jatin,
+      ]),
+    ).toMatchObject({ by: 'email_domain', author: { name: 'Jatin Gohel' } });
+    // The author gave none: same.
+    expect(
+      rules.institutionConflict(
+        { email: 'gaurav@gr-conferences.com', affiliation: 'ETH Zurich' },
+        [{ name: 'Jatin', email: 'jatin@gr-conferences.com', affiliation: '' }],
+      ),
+    ).toMatchObject({ by: 'email_domain' });
   });
 });
 
