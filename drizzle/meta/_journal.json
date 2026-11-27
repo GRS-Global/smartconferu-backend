@@ -190,6 +190,13 @@
       "when": 1795764229750,
       "tag": "0026_email_recipient_read",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795774949768,
+      "tag": "0027_email_attachments",
+      "breakpoints": true
     }
   ]
 }

@@ -383,6 +383,105 @@ describe('Paper files, screening settings and AI mode', () => {
     });
   });
 
+  describe('plagiarism report', () => {
+    it('goes with the revision / rejection email and opens for the authors once they were told', async () => {
+      const { chair, author, conferenceId, submissionId } = await setup();
+      const outsider = await person();
+      await as(author.token)
+        .upload(submissionId, pdf(), 'paper.pdf')
+        .expect(201);
+      const reportBytes = pdf('iThenticate report');
+      const up = await http()
+        .post(api('/files'))
+        .query({ purpose: 'screening_report', conferenceId, submissionId })
+        .set('Authorization', `Bearer ${chair.token}`)
+        .attach('file', reportBytes, 'iThenticate.pdf')
+        .expect(201);
+      const path = up.body.path as string;
+      const open = (token: string) =>
+        http()
+          .get(api('/files'))
+          .query({ path })
+          .set('Authorization', `Bearer ${token}`);
+      const save = (outcome: Record<string, unknown>) =>
+        as(chair.token)
+          .put(`/submissions/${submissionId}/screening/1`, {
+            record: {
+              check: { decision: 'passed' },
+              report: {
+                similarity: 32,
+                files: ['iThenticate.pdf'],
+                file: 'iThenticate.pdf',
+              },
+              paths: { 'iThenticate.pdf': path },
+              outcome,
+            },
+          })
+          .expect(200);
+
+      // Chairs can always open it; the authors not while nothing was decided or told.
+      await open(chair.token).expect(200);
+      await open(author.token).expect(404);
+      await save({ kind: 'hold' });
+      await open(author.token).expect(404);
+      await save({
+        kind: 'revision',
+        reasons: ['Similarity too high'],
+        deadline: 'Dec 20, 2026',
+      });
+      await open(author.token).expect(404); // decided, but not emailed yet
+
+      // The revision email carries the report.
+      await as(chair.token)
+        .post(`/submissions/${submissionId}/screening/1/notify`, {
+          stage: 'revision',
+        })
+        .expect(200);
+      await t.sendQueuedEmails();
+      const mail = t.outbox().find((m) => m.to === author.email);
+      expect(mail?.attachments?.map((a) => a.filename)).toEqual([
+        'iThenticate.pdf',
+      ]);
+      expect(mail?.attachments?.[0].content.equals(reportBytes)).toBe(true);
+      const logged = await t.db.query<{ attachments: unknown }>(
+        `select attachments from email_log where to_email = $1 and template_key like 'screeningRevision%'`,
+        [author.email],
+      );
+      expect(logged.rows[0].attachments).toEqual([
+        { path, fileName: 'iThenticate.pdf' },
+      ]);
+
+      // Once told, the author opens it; someone else still can't.
+      await save({
+        kind: 'revision',
+        reasons: ['Similarity too high'],
+        deadline: 'Dec 20, 2026',
+        emailedAt: 'Nov 27, 2026',
+      });
+      const got = await open(author.token).expect(200);
+      expect(Buffer.from(got.body as Buffer).equals(reportBytes)).toBe(true);
+      await open(outsider.token).expect(404);
+
+      // A rejection carries it too; a cleared paper's report is open to its authors without an email.
+      t.outbox().length = 0;
+      await save({ kind: 'reject', reasons: ['Plagiarism'] });
+      await as(chair.token)
+        .post(`/submissions/${submissionId}/screening/1/notify`, {
+          stage: 'reject',
+        })
+        .expect(200);
+      await t.sendQueuedEmails();
+      expect(
+        t
+          .outbox()
+          .find((m) => m.to === author.email)
+          ?.attachments?.map((a) => a.filename),
+      ).toEqual(['iThenticate.pdf']);
+      await save({ kind: 'clear' });
+      await open(author.token).expect(200);
+    });
+  });
+
   describe('AI mode', () => {
     it('decides nothing when AI mode is off: the chair checks by hand', async () => {
       const { author, submissionId } = await setup();

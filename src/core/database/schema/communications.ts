@@ -8,6 +8,7 @@ import {
   primaryKey,
   text,
   uuid,
+  jsonb,
 } from 'drizzle-orm/pg-core';
 import { createdAt, timestamptz, updatedAt } from './columns.js';
 import { conferences } from './conferences.js';
@@ -82,6 +83,12 @@ export const conferenceEmailTemplates = pgTable(
  * back to `queued` with a later `next_attempt_at` until the attempts run out → `failed`). The chairs
  * read their conference's rows as Email Logs.
  */
+/** A file sent with an email: its FileStorage path and the name the recipient sees. */
+export interface EmailAttachment {
+  path: string;
+  fileName: string;
+}
+
 export const emailLog = pgTable(
   'email_log',
   {
@@ -114,6 +121,8 @@ export const emailLog = pgTable(
     sentBy: uuid('sent_by').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /** Files sent with it, read from FileStorage when it is sent (e.g. a plagiarism report on a screening email). */
+    attachments: jsonb('attachments').$type<EmailAttachment[]>(),
     /** When the person it was sent to read it on Notifications › Emails (null = unread; counted on the bell). */
     recipientReadAt: timestamptz('recipient_read_at'),
     createdAt: createdAt(),

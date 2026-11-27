@@ -8,13 +8,16 @@ import { ConfigService } from '@nestjs/config';
 import { sql } from 'drizzle-orm';
 import type { Env } from '../../config/env.js';
 import { DatabaseService } from '../database/database.service.js';
-import { emailLog } from '../database/schema/index.js';
+import { type EmailAttachment, emailLog } from '../database/schema/index.js';
+import { FileStorage } from '../storage/file-storage.js';
 import { EmailTransport, type SentEmail } from './email.transport.js';
 
 /** Minutes to wait before attempt 2, 3, 4, 5. */
 const RETRY_MINUTES = [1, 5, 30, 120];
 /** An email stuck in `sending` this long (the process died mid-send) goes back to the queue. */
 const STALE_SENDING_MINUTES = 10;
+/** Attachments above this (all files of one email together) are left out: email services refuse large messages (Resend: 40 MB with encoding). */
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
 type Claimed = {
   id: string;
@@ -24,6 +27,7 @@ type Claimed = {
   html: string | null;
   text: string | null;
   reply_to: string | null;
+  attachments: EmailAttachment[] | null;
   attempts: number;
 };
 
@@ -54,6 +58,7 @@ export class EmailWorker
   constructor(
     private readonly database: DatabaseService,
     private readonly transport: EmailTransport,
+    private readonly storage: FileStorage,
     config: ConfigService<Env, true>,
   ) {
     this.enabled = config.get('EMAIL_QUEUE_ENABLED', { infer: true });
@@ -123,20 +128,51 @@ export class EmailWorker
           order by next_attempt_at nulls first, created_at
           limit ${this.batchSize}
           for update skip locked)
-      returning id, to_email, to_name, subject, html, text, reply_to, attempts`);
+      returning id, to_email, to_name, subject, html, text, reply_to, attachments, attempts`);
     return [...rows];
   }
 
+  /** Reads an email's files from storage. A file that is gone, or too much in total, is left out (logged): the email still goes, and the
+   *  file stays on the paper's page. */
+  private async files(row: Claimed): Promise<SentEmail['attachments']> {
+    if (!row.attachments?.length) return undefined;
+    const out: { filename: string; content: Buffer }[] = [];
+    let total = 0;
+    for (const a of row.attachments) {
+      try {
+        const content = await this.storage.get(a.path);
+        if (total + content.length > MAX_ATTACHMENT_BYTES) {
+          this.logger.warn(
+            { emailId: row.id, file: a.fileName },
+            'Attachment left out: too large',
+          );
+          continue;
+        }
+        total += content.length;
+        out.push({ filename: a.fileName, content });
+      } catch (error) {
+        this.logger.warn(
+          { emailId: row.id, file: a.fileName, err: error },
+          'Attachment left out: not found',
+        );
+      }
+    }
+    return out.length ? out : undefined;
+  }
+
   private async deliver(batch: Claimed[]): Promise<DrainResult> {
-    const emails: SentEmail[] = batch.map((row) => ({
-      from: this.from,
-      to: row.to_email,
-      toName: row.to_name,
-      subject: row.subject,
-      html: row.html ?? '',
-      text: row.text ?? '',
-      replyTo: row.reply_to,
-    }));
+    const emails: SentEmail[] = await Promise.all(
+      batch.map(async (row) => ({
+        from: this.from,
+        to: row.to_email,
+        toName: row.to_name,
+        subject: row.subject,
+        html: row.html ?? '',
+        text: row.text ?? '',
+        replyTo: row.reply_to,
+        attachments: await this.files(row),
+      })),
+    );
     const results = await this.transport.sendBatch(emails);
     const result: DrainResult = { sent: 0, failed: 0 };
 

@@ -27,7 +27,13 @@ export interface TestApp {
   /** Plays Google, Microsoft and ORCID. */
   oidc: FakeOidcProvider;
   /** Emails "sent" so far (EMAIL_TRANSPORT=log). */
-  outbox(): { to: string; subject: string; text: string; html: string }[];
+  outbox(): {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+    attachments?: { filename: string; content: Buffer }[];
+  }[];
   /** Sends the email queue now (the background worker is off in tests); emails land in outbox(). */
   sendQueuedEmails(): Promise<{ sent: number; failed: number }>;
   /** Runs the background jobs now (they are off in tests), as of `now`. */
@@ -74,6 +80,8 @@ export async function createTestApp(
   const { privateKey } = generateKeyPairSync('ed25519');
   Object.assign(process.env, {
     API_URL,
+    // A developer's .env may hold the testing switch that stops emails to authors / reviewers; the tests send to everyone.
+    EMAIL_ONLY_TO_ROLES: '',
     MFA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     GOOGLE_CLIENT_ID: 'google-client',
     GOOGLE_CLIENT_SECRET: 'google-secret',

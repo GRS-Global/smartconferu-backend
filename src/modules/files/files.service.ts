@@ -18,6 +18,7 @@ import { AccessService } from '../../core/rbac/access.service.js';
 import { FileStorage } from '../../core/storage/file-storage.js';
 import { storagePaths } from '../../core/storage/storage-paths.js';
 import { CFP_LOCKED_MESSAGE } from '../conferences/cfp-lock.js';
+import { reportSharedWithAuthors } from '../submissions/submission-emails.service.js';
 import type { FilePurpose, UploadedFileResponse } from './dto/files.dto.js';
 
 export interface UploadedFile {
@@ -67,7 +68,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
 /** Every storage path this module hands out; anything else is refused. */
 const PATH = new RegExp(
-  `^(?:users/(?<user>${UUID})/photo-${UUID}\\.(?:png|jpg|webp)|conferences/(?<conference>${UUID})/(?:branding/(?<logo>logo-${UUID}\\.(?:png|jpg|webp))|documents/(?<instructions>review-instructions-${UUID}\\.pdf)|papers/${UUID}/plagiarism/(?<screening>report-${UUID}\\.pdf)))$`,
+  `^(?:users/(?<user>${UUID})/photo-${UUID}\\.(?:png|jpg|webp)|conferences/(?<conference>${UUID})/(?:branding/(?<logo>logo-${UUID}\\.(?:png|jpg|webp))|documents/(?<instructions>review-instructions-${UUID}\\.pdf)|papers/(?<paper>${UUID})/plagiarism/(?<screening>report-${UUID}\\.pdf)))$`,
 );
 
 export type PathKind = 'photo' | 'logo' | 'instructions' | 'screening';
@@ -311,10 +312,30 @@ export class FilesService {
     ) {
       throw AppException.notFound('The file');
     }
-    if (viewer && (kind === 'instructions' || kind === 'screening')) {
+    if (viewer && kind === 'instructions') {
+      await this.access.requireConference(viewer, g.conference);
+    }
+    // A plagiarism report: the conference's chairs, and the paper's own authors once they were told
+    // the decision (cleared, or an emailed revision / rejection).
+    if (viewer && kind === 'screening') {
       const access = await this.access.requireConference(viewer, g.conference);
-      if (kind === 'screening' && !rules.isChair(access)) {
-        throw AppException.notFound('The file');
+      if (!rules.isChair(access)) {
+        const paper = await this.access.submissionAccess(viewer, g.paper);
+        if (!paper || !rules.isAuthorOf(paper)) {
+          throw AppException.notFound('The file');
+        }
+        const [row] = await this.database.db
+          .select({ screening: submissions.screening })
+          .from(submissions)
+          .where(
+            and(
+              eq(submissions.id, g.paper),
+              eq(submissions.conferenceId, g.conference),
+            ),
+          );
+        if (!row || !reportSharedWithAuthors(row.screening, path)) {
+          throw AppException.notFound('The file');
+        }
       }
     }
 

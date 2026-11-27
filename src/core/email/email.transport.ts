@@ -9,6 +9,8 @@ export interface EmailMessage {
   text: string;
   /** Where replies go (a conference's contact address). */
   replyTo?: string | null;
+  /** Files sent with the email. */
+  attachments?: { filename: string; content: Buffer }[];
 }
 
 export interface SentEmail extends EmailMessage {
@@ -66,6 +68,14 @@ export class ResendTransport extends EmailTransport {
       html: email.html,
       text: email.text,
       ...(email.replyTo ? { reply_to: email.replyTo } : {}),
+      ...(email.attachments?.length
+        ? {
+            attachments: email.attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content.toString('base64'),
+            })),
+          }
+        : {}),
     };
   }
 
@@ -94,20 +104,33 @@ export class ResendTransport extends EmailTransport {
     return json.id;
   }
 
-  /** Up to 100 emails per request (Resend's batch endpoint). */
+  /** Up to 100 emails per request (Resend's batch endpoint). The batch endpoint takes no attachments, so an email with files goes on its own. */
   override async sendBatch(emails: SentEmail[]): Promise<BatchResult[]> {
-    const results: BatchResult[] = [];
-    for (let i = 0; i < emails.length; i += RESEND_BATCH_SIZE) {
-      const chunk = emails.slice(i, i + RESEND_BATCH_SIZE);
+    const results: BatchResult[] = Array.from({ length: emails.length }, () => ({}));
+    const plain: number[] = [];
+    for (const [i, email] of emails.entries()) {
+      if (!email.attachments?.length) {
+        plain.push(i);
+        continue;
+      }
+      try {
+        results[i] = { id: await this.send(email) };
+      } catch (error) {
+        results[i] = { error: errorMessage(error) };
+      }
+    }
+    for (let i = 0; i < plain.length; i += RESEND_BATCH_SIZE) {
+      const idx = plain.slice(i, i + RESEND_BATCH_SIZE);
+      const chunk = idx.map((k) => emails[k]);
       try {
         const json = (await this.post(
           '/emails/batch',
           chunk.map((email) => this.payload(email)),
         )) as { data?: { id?: string }[] };
-        chunk.forEach((_, j) => results.push({ id: json.data?.[j]?.id }));
+        idx.forEach((k, j) => (results[k] = { id: json.data?.[j]?.id }));
       } catch (error) {
         const message = errorMessage(error);
-        chunk.forEach(() => results.push({ error: message }));
+        idx.forEach((k) => (results[k] = { error: message }));
       }
     }
     return results;
@@ -122,7 +145,12 @@ export class LogTransport extends EmailTransport {
 
   send(email: SentEmail): Promise<string | undefined> {
     this.outbox.push(email);
-    this.logger.log(`To ${recipient(email)}: ${email.subject}\n${email.text}`);
+    const files = email.attachments?.length
+      ? `\n[attached: ${email.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`).join(', ')}]`
+      : '';
+    this.logger.log(
+      `To ${recipient(email)}: ${email.subject}\n${email.text}${files}`,
+    );
     return Promise.resolve(undefined);
   }
 }

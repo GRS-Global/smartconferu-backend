@@ -5,6 +5,7 @@ import type { Env } from '../../config/env.js';
 import type { Executor } from '../database/database.types.js';
 import {
   conferenceEmailTemplates,
+  type EmailAttachment,
   emailLog,
   emailTemplates,
 } from '../database/schema/index.js';
@@ -31,6 +32,8 @@ interface EmailBase {
   recipientType?: string;
   conference?: EmailConference | null;
   submissionId?: string | null;
+  /** Files to send with it (FileStorage paths), e.g. the plagiarism report on a screening email. */
+  attachments?: EmailAttachment[];
 }
 
 /** An email from a template (the conference's copy, else the platform default). */
@@ -77,10 +80,26 @@ export class EmailQueueService {
   /** Public URL of the logo the emails carry (undefined on a private address). */
   readonly logoUrl: string | undefined;
 
+  /** EMAIL_ONLY_TO_ROLES (testing): the recipient types that are sent, lower case; null = everyone. */
+  private readonly onlyTo: Set<string> | null;
+
   constructor(config: ConfigService<Env, true>) {
     this.logoUrl = emailLogoUrl(
       config.get('APP_URL', { infer: true }),
       config.get('EMAIL_LOGO_URL', { infer: true }),
+    );
+    const only = (config.get('EMAIL_ONLY_TO_ROLES', { infer: true }) ?? '')
+      .split(',')
+      .map((r) => r.trim().toLowerCase())
+      .filter(Boolean);
+    this.onlyTo = only.length ? new Set(only) : null;
+  }
+
+  /** Whether an email to this recipient type is sent (always, unless EMAIL_ONLY_TO_ROLES is set and leaves it out). */
+  private sendsTo(recipientType: string | null | undefined): boolean {
+    return (
+      !this.onlyTo ||
+      this.onlyTo.has((recipientType ?? '').trim().toLowerCase())
     );
   }
 
@@ -152,8 +171,16 @@ export class EmailQueueService {
           VALID_EMAIL.test(email.conference.contactEmail)
             ? email.conference.contactEmail
             : null,
-        status: 'queued',
+        // Test mode (EMAIL_ONLY_TO_ROLES): kept in Email Logs, never sent.
+        ...(this.sendsTo(email.recipientType)
+          ? { status: 'queued' }
+          : {
+              status: 'failed',
+              error: `Not sent: test mode (EMAIL_ONLY_TO_ROLES only sends to ${[...(this.onlyTo ?? [])].join(', ')})`,
+              nextAttemptAt: null,
+            }),
         sentBy: options.sentBy ?? null,
+        attachments: email.attachments?.length ? email.attachments : null,
       });
     }
 

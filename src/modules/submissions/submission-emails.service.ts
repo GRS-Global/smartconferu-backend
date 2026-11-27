@@ -437,12 +437,16 @@ export class SubmissionEmailsService {
       reason: reasons.html,
     };
     const { updates, coAuthors } = await this.authorRecipients(executor, ctx);
+    // A Plagiarism Check revision or rejection carries the report(s) the chair added to that version.
+    const attachments =
+      stage === 'correction' ? [] : screeningReportFiles(record);
     const out: OutgoingEmail[] = updates.map((a): TemplateEmail => ({
       ...this.base(ctx),
       template,
       recipientType: 'Author',
       to: a,
       values: { ...values, first_name: firstName(a.name, a.email) },
+      ...(attachments.length ? { attachments } : {}),
     }));
     if (notice.coAuthors && stage !== 'reject') {
       const already = new Set(updates.map((a) => key(a.email)));
@@ -484,7 +488,64 @@ export interface ScreeningRecord {
     note?: string;
     deadline?: string;
   };
-  report?: { similarity?: number | string | null };
+  report?: {
+    similarity?: number | string | null;
+    /** The report files the chair added (names); `paths` maps each name to its stored file. */
+    files?: unknown;
+    file?: unknown;
+  };
+  /** Stored files of this version's record (only inside the paper's folder: checked when the record is saved). */
+  paths?: Record<string, unknown>;
+}
+
+/** The plagiarism report files of a screening record, as email attachments (stored path + the name the chair gave it). */
+export function screeningReportFiles(
+  record: ScreeningRecord,
+): { path: string; fileName: string }[] {
+  const names = Array.isArray(record.report?.files)
+    ? record.report.files
+    : [record.report?.file];
+  const seen = new Set<string>();
+  const out: { path: string; fileName: string }[] = [];
+  for (const name of names) {
+    if (typeof name !== 'string' || !name || seen.has(name)) continue;
+    const path = record.paths?.[name];
+    if (typeof path !== 'string' || !path || path.includes('..')) continue;
+    seen.add(name);
+    out.push({
+      path,
+      fileName: /\.pdf$/i.test(name) ? name : `${name}.pdf`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Whether the authors may open a plagiarism report stored at `path`: it belongs to a version whose
+ * Plagiarism Check has a decision the authors were told — cleared, or a revision / rejection that
+ * was emailed. Not while it is pending or on hold.
+ */
+export function reportSharedWithAuthors(
+  screening: unknown,
+  path: string,
+): boolean {
+  if (!screening || typeof screening !== 'object') return false;
+  for (const value of Object.values(screening as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const record = value as ScreeningRecord & {
+      outcome?: { kind?: string; emailedAt?: unknown };
+    };
+    if (!screeningReportFiles(record).some((f) => f.path === path)) continue;
+    const kind = record.outcome?.kind;
+    if (kind === 'clear') return true;
+    if (
+      (kind === 'revision' || kind === 'reject') &&
+      record.outcome?.emailedAt
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** The reasons and note of a screening decision, as an HTML list, and its deadline. */

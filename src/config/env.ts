@@ -124,6 +124,13 @@ const envSchema = z.object({
   /** Tries before an email is marked failed. */
   EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
   /**
+   * Testing only: conference / paper emails go only to these recipient types (comma-separated, as
+   * Email Logs shows them), e.g. "Chair,Super Admin". Every other one is still written to Email Logs
+   * but not sent ("Not sent: test mode"). Account emails (verification, sign-in codes, password reset)
+   * always go. Leave empty in production: then every email is sent.
+   */
+  EMAIL_ONLY_TO_ROLES: optionalText,
+  /**
    * Development only: put the admin sign-in code in the sign-in response (`devCode`) so the console
    * can fill it in while no real emails are sent. Refused in production.
    */
