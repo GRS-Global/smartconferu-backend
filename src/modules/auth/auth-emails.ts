@@ -169,6 +169,20 @@ export const resetPassword = (to: string, url: string): EmailMessage =>
       "The link works once and expires after an hour. If you didn't ask for this, you can ignore this email — your password stays the same.",
   });
 
+/** The admin console's own reset email: the link opens the console's reset page, not the website's. */
+export const adminResetPassword = (to: string, url: string): EmailMessage =>
+  renderEmail({
+    to,
+    subject: 'Reset your Super Admin console password',
+    heading: 'Reset your admin console password',
+    paragraphs: [
+      `We received a request from the Super Admin console to reset the password for ${to}.`,
+    ],
+    button: { label: 'Choose a new password', url },
+    footnote:
+      "The link works once and expires after an hour. If you didn't ask for this, you can ignore this email — your password stays the same.",
+  });
+
 export const loginCode = (to: string, code: string): EmailMessage =>
   renderEmail({
     to,

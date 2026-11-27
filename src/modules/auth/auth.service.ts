@@ -686,6 +686,30 @@ export class AuthService {
     );
   }
 
+  /**
+   * "Forgot password?" on the Super Admin console: only an active super admin gets an email, and its
+   * link opens the console's own reset page (/super-admin/reset-password). Any other address gets
+   * nothing, and the caller answers the same either way. The new password is set through resetPassword().
+   */
+  async forgotAdminPassword(email: string): Promise<void> {
+    const user = await this.accounts.findByEmail(email);
+    if (!user?.email || user.status !== 'active' || !user.isSuperAdmin) {
+      return;
+    }
+    const token = await this.oneTimeTokens.issueLink(
+      'reset_password',
+      user.email,
+      user.id,
+      emails.RESET_PASSWORD_TTL_MINUTES,
+    );
+    await this.email.sendQuietly(
+      emails.adminResetPassword(
+        user.email,
+        this.link('super-admin/reset-password', token),
+      ),
+    );
+  }
+
   /** Sets a new password from an emailed link and signs the account out everywhere. */
   async resetPassword(
     token: string,

@@ -314,6 +314,19 @@ export class AuthController {
   }
 
   @Public()
+  @Post('admin/password/forgot')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary:
+      'Super Admin console: email a reset link that opens the console (super admins only; same answer for any address)',
+  })
+  @ApiAcceptedResponse({ type: MessageResponse })
+  async forgotAdminPassword(@Body() dto: EmailDto): Promise<MessageResponse> {
+    await this.auth.forgotAdminPassword(dto.email);
+    return CHECK_EMAIL;
+  }
+
+  @Public()
   @Post('password/reset')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
