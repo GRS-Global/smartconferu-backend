@@ -24,7 +24,7 @@ import {
   IsOptional,
   IsUUID,
 } from 'class-validator';
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { CurrentUser } from '../../core/auth/auth.decorators.js';
 import { DatabaseService } from '../../core/database/database.service.js';
@@ -37,6 +37,10 @@ import {
 } from '../../core/database/schema/index.js';
 import { paperId } from '../submissions/submission.mapper.js';
 import { toNotificationView } from '../../core/notifications/notification.view.js';
+import {
+  countUnread,
+  emailsTo,
+} from '../../core/notifications/unread-count.js';
 import {
   decodeCursor,
   keyset,
@@ -113,7 +117,10 @@ export class NotificationResponse {
 export class NotificationPage {
   @ApiProperty({ type: [NotificationResponse] }) data: NotificationResponse[];
   @ApiProperty({ nullable: true, type: String }) nextCursor: string | null;
-  @ApiProperty({ description: 'How many are not read yet (all of them).' })
+  @ApiProperty({
+    description:
+      'How many are not read yet: all notifications plus the emails sent to me (the bell).',
+  })
   unread: number;
 }
 
@@ -132,6 +139,26 @@ export class MyEmailResponse {
   @ApiProperty({ nullable: true, type: String })
   conferenceContact: string | null;
   @ApiProperty({ nullable: true, type: String }) paperLabel: string | null;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    format: 'date-time',
+    description: 'When I read it here; null = unread (counted on the bell).',
+  })
+  readAt: string | null;
+}
+
+export class MarkEmailsReadDto {
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    description: 'The emails to mark read; leave out to mark all of them.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  ids?: string[];
 }
 
 export class EmailsQuery {
@@ -216,7 +243,56 @@ export class BellService {
         ),
       )
       .returning({ id: notifications.id });
-    return { updated: updated.length, unread: await this.unread(user) };
+    // "Mark all as read" covers the Emails tab too.
+    const emails = ids ? 0 : await this.setEmailsRead(user, undefined, true);
+    return {
+      updated: updated.length + emails,
+      unread: await this.unread(user),
+    };
+  }
+
+  /** Marks emails sent to me read (these, or all of them) or, with `read` false, unread again. */
+  async markEmails(
+    user: AuthUser,
+    ids: string[] | undefined,
+    read: boolean,
+  ): Promise<MarkReadResponse> {
+    const updated =
+      ids?.length === 0 ? 0 : await this.setEmailsRead(user, ids, read);
+    return { updated, unread: await this.unread(user) };
+  }
+
+  private async setEmailsRead(
+    user: AuthUser,
+    ids: string[] | undefined,
+    read: boolean,
+  ): Promise<number> {
+    const email = await this.myEmail(user);
+    if (!email) {
+      return 0;
+    }
+    const rows = await this.database.db
+      .update(emailLog)
+      .set({ recipientReadAt: read ? new Date() : null })
+      .where(
+        and(
+          emailsTo(email),
+          read
+            ? isNull(emailLog.recipientReadAt)
+            : isNotNull(emailLog.recipientReadAt),
+          ids ? inArray(emailLog.id, ids) : undefined,
+        ),
+      )
+      .returning({ id: emailLog.id });
+    return rows.length;
+  }
+
+  private async myEmail(user: AuthUser): Promise<string | null> {
+    const [me] = await this.database.db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, user.id));
+    return me?.email ?? null;
   }
 
   /** Puts read notifications back to unread (the Notifications page's read / unread toggle). */
@@ -240,11 +316,8 @@ export class BellService {
 
   /** The emails sent to my own address (the Emails tab), newest first. Only what was sent. */
   async emails(user: AuthUser, limit: number): Promise<MyEmailResponse[]> {
-    const [me] = await this.database.db
-      .select({ email: users.email })
-      .from(users)
-      .where(eq(users.id, user.id));
-    if (!me?.email) {
+    const email = await this.myEmail(user);
+    if (!email) {
       return [];
     }
     const rows = await this.database.db
@@ -259,16 +332,12 @@ export class BellService {
         acronym: conferences.acronym,
         contact: conferences.contactEmail,
         paperNo: submissions.paperNo,
+        readAt: emailLog.recipientReadAt,
       })
       .from(emailLog)
       .leftJoin(conferences, eq(conferences.id, emailLog.conferenceId))
       .leftJoin(submissions, eq(submissions.id, emailLog.submissionId))
-      .where(
-        and(
-          sql`lower(${emailLog.toEmail}) = lower(${me.email})`,
-          eq(emailLog.status, 'sent'),
-        ),
-      )
+      .where(emailsTo(email))
       .orderBy(desc(emailLog.createdAt), desc(emailLog.id))
       .limit(limit);
     return rows.map((r) => ({
@@ -282,17 +351,13 @@ export class BellService {
       conferenceAcronym: r.acronym,
       conferenceContact: r.contact,
       paperLabel: r.acronym && r.paperNo ? paperId(r.acronym, r.paperNo) : null,
+      readAt: r.readAt?.toISOString() ?? null,
     }));
   }
 
-  private async unread(user: AuthUser): Promise<number> {
-    const [row] = await this.database.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(notifications)
-      .where(
-        and(eq(notifications.userId, user.id), isNull(notifications.readAt)),
-      );
-    return row?.count ?? 0;
+  /** Unread notifications plus unread emails (the bell's number). */
+  private unread(user: AuthUser): Promise<number> {
+    return countUnread(this.database.db, user.id);
   }
 }
 
@@ -325,7 +390,10 @@ export class NotificationsController {
 
   @Post('read')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark my notifications read (these, or all)' })
+  @ApiOperation({
+    summary:
+      'Mark my notifications read (these, or all; "all" also marks my emails read)',
+  })
   @ApiOkResponse({ type: MarkReadResponse })
   markRead(
     @CurrentUser() user: AuthUser,
@@ -354,5 +422,27 @@ export class MyEmailsController {
   ): Promise<MyEmailResponse[]> {
     const limit = Number.isInteger(query.limit) ? query.limit! : 100;
     return this.bell.emails(user, Math.min(Math.max(limit, 1), 200));
+  }
+
+  @Post('read')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark emails sent to me read (these, or all)' })
+  @ApiOkResponse({ type: MarkReadResponse })
+  markRead(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: MarkEmailsReadDto,
+  ): Promise<MarkReadResponse> {
+    return this.bell.markEmails(user, dto.ids, true);
+  }
+
+  @Post('unread')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark emails sent to me unread again' })
+  @ApiOkResponse({ type: MarkReadResponse })
+  markUnread(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: MarkUnreadDto,
+  ): Promise<MarkReadResponse> {
+    return this.bell.markEmails(user, dto.ids, false);
   }
 }

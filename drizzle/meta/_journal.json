@@ -183,6 +183,13 @@
       "when": 1795677294849,
       "tag": "0025_submission_alert_paper_number",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795764229750,
+      "tag": "0026_email_recipient_read",
+      "breakpoints": true
     }
   ]
 }

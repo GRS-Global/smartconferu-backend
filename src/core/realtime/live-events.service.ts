@@ -7,7 +7,7 @@ import {
   type OnApplicationBootstrap,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type postgres from 'postgres';
 import type { Env } from '../../config/env.js';
 import { DatabaseService } from '../database/database.service.js';
@@ -18,6 +18,7 @@ import {
   type NotificationView,
   toNotificationView,
 } from '../notifications/notification.view.js';
+import { countUnread } from '../notifications/unread-count.js';
 
 /** The Postgres channel live events travel on between API instances. */
 const CHANNEL = 'sc_live_events';
@@ -220,13 +221,8 @@ export class LiveEventsService
     };
   }
 
-  private async unread(userId: string): Promise<number> {
-    const [row] = await this.database.db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(notifications)
-      .where(
-        and(eq(notifications.userId, userId), isNull(notifications.readAt)),
-      );
-    return row?.count ?? 0;
+  /** Unread notifications plus unread emails, like the bell (core/notifications/unread-count.ts). */
+  private unread(userId: string): Promise<number> {
+    return countUnread(this.database.db, userId);
   }
 }

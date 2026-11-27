@@ -114,11 +114,17 @@ export const emailLog = pgTable(
     sentBy: uuid('sent_by').references(() => users.id, {
       onDelete: 'set null',
     }),
+    /** When the person it was sent to read it on Notifications › Emails (null = unread; counted on the bell). */
+    recipientReadAt: timestamptz('recipient_read_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index('email_log_conference_idx').on(t.conferenceId, t.createdAt.desc()),
+    // The bell's unread count: sent emails to one address that nobody has read yet.
+    index('email_log_recipient_unread_idx')
+      .on(sql`lower(${t.toEmail})`)
+      .where(sql`${t.recipientReadAt} is null and ${t.status} = 'sent'`),
     index('email_log_queue_idx')
       .on(t.nextAttemptAt)
       .where(sql`${t.status} = 'queued'`),
