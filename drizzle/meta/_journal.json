@@ -208,8 +208,15 @@
     {
       "idx": 29,
       "version": "7",
-      "when": 1795845214162,
-      "tag": "0029_author-email-optional",
+      "when": 1795846667930,
+      "tag": "0029_decision_author_label",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795852253796,
+      "tag": "0030_author-email-optional",
       "breakpoints": true
     }
   ]

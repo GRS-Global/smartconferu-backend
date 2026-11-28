@@ -207,6 +207,19 @@ export class DecisionTypeDto {
   @IsString()
   @MaxLength(1000)
   description?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: String,
+    maxLength: 120,
+    description:
+      'The status text the author sees on their paper; leave empty for the standard wording.',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(120)
+  authorLabel?: string | null;
 }
 
 export class DecisionTypesDto {
@@ -412,6 +425,7 @@ export class DecisionTypeResponse {
   @ApiProperty() color: string;
   @ApiProperty({ enum: decisionOutcome.enumValues }) outcome: DecisionOutcome;
   @ApiProperty({ nullable: true, type: String }) description: string | null;
+  @ApiProperty({ nullable: true, type: String }) authorLabel: string | null;
   @ApiProperty() position: number;
 }
 

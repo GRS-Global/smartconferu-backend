@@ -1,5 +1,5 @@
 {
-  "id": "67bcbc1c-a019-4292-8b36-b32958205ba5",
+  "id": "cdf7f0d1-1c52-4ab6-b5f0-ea9f6892a1b6",
   "prevId": "552f27fa-e524-403d-bbad-47ddf8cc9614",
   "version": "7",
   "dialect": "postgresql",
@@ -1676,6 +1676,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "author_label": {
+          "name": "author_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "position": {
           "name": "position",
           "type": "integer",
@@ -2002,7 +2008,7 @@
           "name": "email",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "affiliation": {
           "name": "affiliation",

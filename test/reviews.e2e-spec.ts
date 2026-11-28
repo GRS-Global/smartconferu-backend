@@ -1000,10 +1000,18 @@ describe('Peer review and decisions', () => {
         .put(`/conferences/${s.conferenceId}/decision-types`, {
           types: [
             { id: used.id, label: 'Cleared', outcome: 'plagiarism_clear' },
-            { label: 'Strong accept', outcome: 'accept', color: '#16A34A' },
+            {
+              label: 'Strong accept',
+              outcome: 'accept',
+              color: '#16A34A',
+              authorLabel: '  Accepted — see you there  ',
+            },
           ],
         })
         .expect(200);
+      // The author's own wording is saved (trimmed) and the authors can read it.
+      expect(res.body[1].authorLabel).toBe('Accepted — see you there');
+      expect(res.body[0].authorLabel).toBeNull();
       expect(
         res.body.map((d: { label: string; position: number }) => [
           d.label,

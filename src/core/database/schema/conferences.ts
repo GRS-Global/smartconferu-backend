@@ -159,6 +159,8 @@ export const decisionTypes = pgTable(
     color: text().notNull().default('#64748B'),
     outcome: decisionOutcome().notNull(),
     description: text(),
+    /** The status text the author sees for this decision ("Author sees"); null = the standard wording. */
+    authorLabel: text('author_label'),
     position: integer().notNull().default(0),
   },
   (t) => [index('decision_types_conference_idx').on(t.conferenceId)],

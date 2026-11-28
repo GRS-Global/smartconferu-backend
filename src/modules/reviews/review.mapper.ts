@@ -135,6 +135,7 @@ export function toDecisionType(t: DecisionTypeRow): DecisionTypeResponse {
     color: t.color,
     outcome: t.outcome,
     description: t.description,
+    authorLabel: t.authorLabel,
     position: t.position,
   };
 }

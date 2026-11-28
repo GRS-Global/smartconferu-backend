@@ -198,6 +198,20 @@ describe('AI features (against a fake Claude and Voyage)', () => {
     expect(declined.body.code).toBe('AI_FAILED');
   });
 
+  it('writes a one-line conference summary, and needs something to go on', async () => {
+    const user = await person();
+    fake.answer = () => ({
+      summary: '  A conference on AI systems\n for researchers.  ',
+    });
+    const res = await as(user.token)
+      .post('/ai/summary', { title: 'AI Systems 2027', topics: ['Edge AI'] })
+      .expect(200);
+    expect(res.body).toEqual({
+      summary: 'A conference on AI systems for researchers.',
+    });
+    await as(user.token).post('/ai/summary', {}).expect(400);
+  });
+
   it('polishes a review into three versions', async () => {
     const user = await person();
     fake.answer = () => ({

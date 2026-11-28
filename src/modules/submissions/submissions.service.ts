@@ -182,9 +182,11 @@ export class SubmissionsService {
         })
       ) {
         throw AppException.businessRule(
-          info.cfpStatus !== 'published'
-            ? "This conference isn't taking submissions: its Call for Papers isn't published."
-            : 'The submission deadline has passed.',
+          access.status === 'archived'
+            ? 'This conference is archived, so authors can no longer submit papers. A chair can still add a paper for you.'
+            : info.cfpStatus !== 'published'
+              ? "This conference isn't taking submissions: its Call for Papers isn't published."
+              : 'The submission deadline has passed.',
         );
       }
 
