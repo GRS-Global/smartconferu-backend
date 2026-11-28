@@ -242,6 +242,7 @@ describe('License requests and Activity Logs', () => {
         .post(`/conferences/${s.id}/submissions`, {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',
@@ -331,6 +332,7 @@ describe('License requests and Activity Logs', () => {
         .post(`/conferences/${s.id}/submissions`, {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',

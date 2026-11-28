@@ -152,14 +152,18 @@ class PaperDetailsDto {
   @MaxLength(10_000)
   abstract: string;
 
-  @ApiPropertyOptional({ type: [String], example: ['GNN', 'proteins'] })
-  @IsOptional()
+  @ApiProperty({
+    type: [String],
+    example: ['GNN', 'proteins'],
+    description: 'At least one keyword is needed.',
+  })
   @Transform(cleanKeywords)
-  @IsArray()
+  @IsArray({ message: 'Add at least one keyword.' })
+  @ArrayMinSize(1, { message: 'Add at least one keyword.' })
   @ArrayMaxSize(20)
   @IsString({ each: true })
   @MaxLength(100, { each: true })
-  keywords?: string[];
+  keywords: string[];
 }
 
 export class AuthorListDto {
@@ -218,7 +222,18 @@ export class CreateSubmissionDto extends PaperDetailsDto {
   onBehalf?: boolean;
 }
 
-export class UpdateDetailsDto extends PaperDetailsDto {}
+export class UpdateDetailsDto extends PaperDetailsDto {
+  @ApiPropertyOptional({
+    example: 'Machine Learning',
+    description:
+      'Moves the paper to another track. Left out (or empty), the track stays as it is.',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(200)
+  track?: string | null;
+}
 
 export class ConferencePapersQuery {
   @ApiPropertyOptional({

@@ -365,6 +365,9 @@ export class SubmissionsService {
         abstract: dto.abstract,
         keywords: dto.keywords ?? [],
       });
+      if (dto.track) {
+        await this.submissions.setTrack(tx, [submissionId], dto.track);
+      }
       await this.record(
         tx,
         user,

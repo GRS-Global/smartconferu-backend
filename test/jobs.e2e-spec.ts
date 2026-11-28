@@ -85,6 +85,7 @@ describe('Background jobs', () => {
       .post(`/conferences/${conferenceId}/submissions`, {
         title: 'A paper',
         abstract: 'An abstract.',
+        keywords: ['test'],
         authors: [
           {
             affiliation: 'Test University',

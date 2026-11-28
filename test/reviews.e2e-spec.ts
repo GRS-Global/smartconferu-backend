@@ -108,6 +108,7 @@ describe('Peer review and decisions', () => {
       .post(`/conferences/${conferenceId}/submissions`, {
         title: 'Graph networks for protein folding',
         abstract: 'We show that graph networks fold proteins.',
+        keywords: ['test'],
         authors: [
           {
             affiliation: 'Test University',

@@ -78,6 +78,7 @@ describe('The super-admin console', () => {
       .post(`/conferences/${conferenceId}/submissions`, {
         title: 'A paper',
         abstract: 'An abstract.',
+        keywords: ['test'],
         authors: [
           {
             affiliation: 'Test University',

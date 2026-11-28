@@ -647,6 +647,27 @@ describe('Submissions, screening and the email queue', () => {
         keywords: ['GNN'],
       });
 
+      // The track can be changed here too; left out, it stays.
+      const before = edited.body.track;
+      const moved = await as(coAuthor.token)
+        .patch(`/submissions/${submission.id}`, {
+          title: 'A better title',
+          abstract: 'Shorter.',
+          keywords: ['GNN'],
+          track: 'Machine Learning',
+        })
+        .expect(200);
+      expect(moved.body.track).toBe('Machine Learning');
+      expect(before).not.toBe('Machine Learning');
+      const kept = await as(coAuthor.token)
+        .patch(`/submissions/${submission.id}`, {
+          title: 'A better title',
+          abstract: 'Shorter.',
+          keywords: ['GNN'],
+        })
+        .expect(200);
+      expect(kept.body.track).toBe('Machine Learning');
+
       const types = await t.db.query<{ id: string; outcome: string }>(
         'select id, outcome from decision_types where conference_id = $1',
         [submission.conferenceId],
@@ -658,7 +679,11 @@ describe('Submissions, screening and the email queue', () => {
         })
         .expect(200);
       const late = await as(coAuthor.token)
-        .patch(`/submissions/${submission.id}`, { title: 'x', abstract: 'y' })
+        .patch(`/submissions/${submission.id}`, {
+          title: 'x',
+          abstract: 'y',
+          keywords: ['test'],
+        })
         .expect(422);
       expect(late.body.message).toBe('This paper can no longer be changed.');
       // The chair hasn't sent the decision: the author still sees "under review".
@@ -691,6 +716,7 @@ describe('Submissions, screening and the email queue', () => {
         .patch(`/submissions/${id}`, {
           title: 'Fixed title',
           abstract: 'Fixed.',
+          keywords: ['test'],
         })
         .expect(200);
       // Una registers: the paper is linked to her account, and now it's hers to edit.
@@ -700,10 +726,18 @@ describe('Submissions, screening and the email queue', () => {
         [una.id],
       );
       await as(chair.token)
-        .patch(`/submissions/${id}`, { title: 'Again', abstract: 'Again.' })
+        .patch(`/submissions/${id}`, {
+          title: 'Again',
+          abstract: 'Again.',
+          keywords: ['test'],
+        })
         .expect(403);
       await as(await t.tokenFor(una.id))
-        .patch(`/submissions/${id}`, { title: 'Mine now', abstract: 'Mine.' })
+        .patch(`/submissions/${id}`, {
+          title: 'Mine now',
+          abstract: 'Mine.',
+          keywords: ['test'],
+        })
         .expect(200);
     });
 
@@ -1152,6 +1186,7 @@ describe('Submissions, screening and the email queue', () => {
         .patch(`/submissions/${second.body.id}`, {
           title: 'Graph Networks for Protein Folding',
           abstract: 'x',
+          keywords: ['test'],
         })
         .expect(409);
       // A paper keeps its own title, and a withdrawn paper's title is free again.
@@ -1159,6 +1194,7 @@ describe('Submissions, screening and the email queue', () => {
         .patch(`/submissions/${first.body.id}`, {
           title: 'Graph networks for protein folding',
           abstract: 'Shorter.',
+          keywords: ['test'],
         })
         .expect(200);
       await as(author.token)
@@ -1168,6 +1204,7 @@ describe('Submissions, screening and the email queue', () => {
         .patch(`/submissions/${second.body.id}`, {
           title: 'Graph networks for protein folding',
           abstract: 'x',
+          keywords: ['test'],
         })
         .expect(200);
     });

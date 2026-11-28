@@ -424,7 +424,9 @@ describe('Conferences, CFP and team', () => {
     it('opens at once, with no Super Admin approval, when CFP_AUTO_APPROVE is on (the default outside the tests)', async () => {
       const chair = await person();
       const id = await liveConference(chair);
-      const cfps = t.app.get(CfpsService) as unknown as { autoApprove: boolean };
+      const cfps = t.app.get(CfpsService) as unknown as {
+        autoApprove: boolean;
+      };
       cfps.autoApprove = true;
       try {
         const live = await as(chair.token)
@@ -630,6 +632,7 @@ describe('Conferences, CFP and team', () => {
         .post(`/conferences/${id}/submissions`, {
           title: 'A paper',
           abstract: 'Words.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',
@@ -661,6 +664,7 @@ describe('Conferences, CFP and team', () => {
         .post(`/conferences/${id}/submissions`, {
           title: 'A paper',
           abstract: 'Words.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',

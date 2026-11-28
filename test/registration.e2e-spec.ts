@@ -83,6 +83,7 @@ describe('Payment and attendance of accepted papers', () => {
           .post(`/conferences/${conferenceId}/submissions`, {
             title,
             abstract: 'An abstract.',
+            keywords: ['test'],
             authors: [
               {
                 affiliation: 'Test University',

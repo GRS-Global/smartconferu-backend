@@ -139,6 +139,7 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
         .post(`/conferences/${conferenceId}/submissions`, {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',
@@ -196,6 +197,7 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
         .post(`/conferences/${conferenceId}/submissions`, {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',
@@ -325,6 +327,7 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
           .post(`/conferences/${conferenceId}/submissions`, {
             title,
             abstract: 'An abstract.',
+            keywords: ['test'],
             authors: [
               {
                 affiliation: 'Test University',
@@ -416,6 +419,7 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
         .post(`/conferences/${conferenceId}/submissions`, {
           title: 'A paper',
           abstract: 'An abstract.',
+          keywords: ['test'],
           authors: [
             {
               affiliation: 'Test University',
