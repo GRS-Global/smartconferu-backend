@@ -97,7 +97,10 @@ export const submissionAuthors = pgTable(
     }),
     name: text().notNull(),
     email: text().notNull(),
+    /** The institution only (no department, city or country: those have their own fields). */
     affiliation: text(),
+    department: text(),
+    city: text(),
     country: text(),
     isCorresponding: boolean('is_corresponding').notNull().default(false),
   },

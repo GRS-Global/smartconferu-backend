@@ -84,8 +84,21 @@ describe('Payment and attendance of accepted papers', () => {
             title,
             abstract: 'An abstract.',
             authors: [
-              { name: 'Ada Author', email: author.email, corresponding: true },
-              { name: 'Ben Second', email: 'Ben.Second@uni.example' },
+              {
+                affiliation: 'Test University',
+                city: 'Pune',
+                country: 'India',
+                name: 'Ada Author',
+                email: author.email,
+                corresponding: true,
+              },
+              {
+                affiliation: 'Test University',
+                city: 'Pune',
+                country: 'India',
+                name: 'Ben Second',
+                email: 'Ben.Second@uni.example',
+              },
             ],
           })
           .expect(201)

@@ -83,7 +83,14 @@ describe('Frontend connection helpers', () => {
         keywords: ['GNN'],
         track: 'AI Track',
         authors: [
-          { name: 'Ada Author', email: author.email, corresponding: true },
+          {
+            affiliation: 'Test University',
+            city: 'Pune',
+            country: 'India',
+            name: 'Ada Author',
+            email: author.email,
+            corresponding: true,
+          },
         ],
       })
       .expect(201);

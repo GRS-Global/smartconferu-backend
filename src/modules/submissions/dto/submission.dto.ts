@@ -61,6 +61,20 @@ export class AuthorDto {
   @IsOptional()
   @Transform(trimToNull)
   @IsString()
+  @MaxLength(300)
+  department?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(120)
+  city?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
   @MaxLength(100)
   country?: string | null;
 
@@ -321,6 +335,8 @@ export class AuthorResponse {
   @ApiProperty() name: string;
   @ApiProperty() email: string;
   @ApiProperty({ nullable: true, type: String }) affiliation: string | null;
+  @ApiProperty({ nullable: true, type: String }) department: string | null;
+  @ApiProperty({ nullable: true, type: String }) city: string | null;
   @ApiProperty({ nullable: true, type: String }) country: string | null;
   @ApiProperty() corresponding: boolean;
   @ApiProperty({

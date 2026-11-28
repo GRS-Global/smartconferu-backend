@@ -91,6 +91,21 @@ describe('Conferences, CFP and team', () => {
       )
     ).rows;
 
+  describe('past dates', () => {
+    const past = {
+      acronym: 'OLD 2024',
+      title: 'A Conference That Already Took Place 2024',
+      startDate: '2024-03-15',
+      endDate: '2024-03-17',
+    };
+
+    it('refuses a new conference for days that are over', async () => {
+      const chair = await person();
+      const res = await as(chair.token).post('/conferences', past).expect(400);
+      expect(res.body.message).toBe('The conference dates are in the past.');
+    });
+  });
+
   describe('requesting and approving a conference', () => {
     it('creates a request with its chair, decision labels and an empty CFP', async () => {
       const chair = await person();
@@ -592,7 +607,16 @@ describe('Conferences, CFP and team', () => {
         .post(`/conferences/${id}/submissions`, {
           title: 'A paper',
           abstract: 'Words.',
-          authors: [{ name: 'A', email: author.email, corresponding: true }],
+          authors: [
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'A',
+              email: author.email,
+              corresponding: true,
+            },
+          ],
         })
         .expect(422);
 
@@ -614,7 +638,16 @@ describe('Conferences, CFP and team', () => {
         .post(`/conferences/${id}/submissions`, {
           title: 'A paper',
           abstract: 'Words.',
-          authors: [{ name: 'A', email: author.email, corresponding: true }],
+          authors: [
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'A',
+              email: author.email,
+              corresponding: true,
+            },
+          ],
         })
         .expect(201);
     });

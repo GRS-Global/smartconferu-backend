@@ -124,7 +124,14 @@ describe('Paper files, screening settings and AI mode', () => {
         title: 'Graph networks for protein folding',
         abstract: 'We show that graph networks fold proteins.',
         authors: [
-          { name: 'Ada Author', email: author.email, corresponding: true },
+          {
+            affiliation: 'Test University',
+            city: 'Pune',
+            country: 'India',
+            name: 'Ada Author',
+            email: author.email,
+            corresponding: true,
+          },
         ],
       })
       .expect(201);

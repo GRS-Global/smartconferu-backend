@@ -13,12 +13,32 @@ describe('Verify my profile', () => {
   const http = () => request(t.app.getHttpServer());
   const api = (p: string) => `/api/v1${p}`;
 
+  const EVIDENCE = {
+    googleScholarUrl: 'https://scholar.google.com/citations?user=x',
+    linkedinUrl: 'https://www.linkedin.com/in/mia',
+    timeline: [
+      {
+        id: 'm1',
+        type: 'membership',
+        title: 'Member',
+        org: 'IEEE',
+        current: true,
+        societyId: 'ieee',
+      },
+    ],
+  };
+
   async function member(email = 'mia@example.org', complete = true) {
     const user = await t.createUser({ email, firstName: 'Mia' });
     if (complete) {
       await t.db.query(
         `update profiles set designation = 'Professor', affiliation = 'IIT Bombay', country = 'India' where id = $1`,
         [user.id],
+      );
+      // Something to verify against: two profile links and a membership.
+      await t.db.query(
+        `update profile_details set data = $2::jsonb where user_id = $1`,
+        [user.id, JSON.stringify(EVIDENCE)],
       );
     }
     return { ...user, token: await t.tokenFor(user.id) };
@@ -54,6 +74,57 @@ describe('Verify my profile', () => {
   it('needs a filled-in profile first', async () => {
     const mia = await member('mia@example.org', false);
     await as(mia.token).post('/me/profile-verification').expect(422);
+  });
+
+  it('needs at least two profile links and one membership', async () => {
+    const mia = await member();
+    const set = (data: object, orcid: string | null = null) =>
+      Promise.all([
+        t.db.query(
+          'update profile_details set data = $2::jsonb where user_id = $1',
+          [mia.id, JSON.stringify(data)],
+        ),
+        t.db.query('update profiles set orcid_id = $2 where id = $1', [
+          mia.id,
+          orcid,
+        ]),
+      ]);
+    // One link only.
+    await set({
+      linkedinUrl: 'https://linkedin.com/in/mia',
+      timeline: EVIDENCE.timeline,
+    });
+    const one = await as(mia.token)
+      .post('/me/profile-verification')
+      .expect(422);
+    expect(one.body.message).toMatch(/at least 2 profile links .*you have 1/);
+    // Two links (ORCID counts), no membership.
+    await set(
+      { linkedinUrl: 'https://linkedin.com/in/mia' },
+      '0000-0002-1825-0097',
+    );
+    const noMem = await as(mia.token)
+      .post('/me/profile-verification')
+      .expect(422);
+    expect(noMem.body.message).toMatch(/at least 1 membership/);
+    // A membership a Super Admin refused does not count.
+    await set(
+      {
+        linkedinUrl: 'https://linkedin.com/in/mia',
+        timeline: [{ ...EVIDENCE.timeline[0], verification: 'rejected' }],
+      },
+      '0000-0002-1825-0097',
+    );
+    await as(mia.token).post('/me/profile-verification').expect(422);
+    // Two links (ORCID + LinkedIn) and a membership: accepted.
+    await set(
+      {
+        linkedinUrl: 'https://linkedin.com/in/mia',
+        timeline: EVIDENCE.timeline,
+      },
+      '0000-0002-1825-0097',
+    );
+    await as(mia.token).post('/me/profile-verification').expect(200);
   });
 
   it('files one request, tells the Super Admin, and cannot be filed twice', async () => {

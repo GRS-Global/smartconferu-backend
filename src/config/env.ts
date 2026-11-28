@@ -131,6 +131,11 @@ const envSchema = z.object({
    */
   EMAIL_ONLY_TO_ROLES: optionalText,
   /**
+   * Testing only: a new conference may have dates that are over (to try the app with a conference
+   * that already took place). Keep false (the default) in production.
+   */
+  ALLOW_PAST_CONFERENCE_DATES: bool.default(false),
+  /**
    * Development only: put the admin sign-in code in the sign-in response (`devCode`) so the console
    * can fill it in while no real emails are sent. Refused in production.
    */

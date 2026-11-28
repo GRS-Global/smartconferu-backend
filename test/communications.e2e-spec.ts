@@ -140,7 +140,14 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
           authors: [
-            { name: 'Ada Author', email: author.email, corresponding: true },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Ada Author',
+              email: author.email,
+              corresponding: true,
+            },
           ],
         })
         .expect(201);
@@ -190,7 +197,14 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
           authors: [
-            { name: 'Ada Author', email: author.email, corresponding: true },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Ada Author',
+              email: author.email,
+              corresponding: true,
+            },
           ],
         })
         .expect(201);
@@ -313,11 +327,20 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
             abstract: 'An abstract.',
             authors: [
               {
+                affiliation: 'Test University',
+                city: 'Pune',
+                country: 'India',
                 name: 'Dr. Ada Author',
                 email: author.email,
                 corresponding: true,
               },
-              { name: 'Bo Coauthor', email: 'bo@example.test' },
+              {
+                affiliation: 'Test University',
+                city: 'Pune',
+                country: 'India',
+                name: 'Bo Coauthor',
+                email: 'bo@example.test',
+              },
             ],
           })
           .expect(201);
@@ -393,7 +416,16 @@ describe('Notifications, email templates, Email Logs and custom emails', () => {
         .post(`/conferences/${conferenceId}/submissions`, {
           title: 'A paper',
           abstract: 'An abstract.',
-          authors: [{ name: 'A', email: author.email, corresponding: true }],
+          authors: [
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'A',
+              email: author.email,
+              corresponding: true,
+            },
+          ],
         })
         .expect(201);
       const rows = await t.db.query(

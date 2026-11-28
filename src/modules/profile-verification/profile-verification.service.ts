@@ -110,8 +110,11 @@ export class ProfileVerificationService {
           lastName: profiles.lastName,
           designation: profiles.designation,
           affiliation: profiles.affiliation,
+          orcidId: profiles.orcidId,
+          details: profileDetails.data,
         })
         .from(profiles)
+        .leftJoin(profileDetails, eq(profileDetails.userId, profiles.id))
         .where(eq(profiles.id, user.id));
       if (
         !profile?.firstName ||
@@ -121,6 +124,20 @@ export class ProfileVerificationService {
       ) {
         throw AppException.businessRule(
           'Add your name, designation and affiliation to your profile first, so there is something to verify.',
+        );
+      }
+      // Something to check against: two profiles elsewhere ("Find me on") and a society membership.
+      const evidence = verificationEvidence(profile.orcidId, profile.details);
+      if (evidence.links < 2 || evidence.memberships < 1) {
+        throw AppException.businessRule(
+          [
+            evidence.links < 2 &&
+              `add at least 2 profile links (ORCID, Google Scholar, ResearchGate, LinkedIn…; you have ${evidence.links})`,
+            evidence.memberships < 1 && 'add at least 1 membership',
+          ]
+            .filter(Boolean)
+            .join(' and ')
+            .replace(/^./, (x) => `To ask for verification, ${x}`) + '.',
         );
       }
       const [row] = await tx
@@ -333,4 +350,43 @@ export class ProfileVerificationService {
       );
     });
   }
+}
+
+/** The profile links counted for verification ("Find me on"): ORCID plus the scholar and professional profiles. */
+export const VERIFICATION_LINK_KEYS = [
+  'researchGateUrl',
+  'dblpUrl',
+  'googleScholarUrl',
+  'scopusId',
+  'openAlexUrl',
+  'linkedinUrl',
+  'youtubeUrl',
+  'facebookUrl',
+  'twitterUrl',
+  'githubUrl',
+] as const;
+
+/**
+ * What a verification request rests on: how many profile links are filled in (ORCID counts) and how
+ * many memberships the profile lists (a society a Super Admin refused does not count).
+ */
+export function verificationEvidence(
+  orcidId: string | null | undefined,
+  details: unknown,
+): { links: number; memberships: number } {
+  const d =
+    details && typeof details === 'object'
+      ? (details as Record<string, unknown>)
+      : {};
+  const filled = (v: unknown) => typeof v === 'string' && v.trim() !== '';
+  const links =
+    (filled(orcidId) ? 1 : 0) +
+    VERIFICATION_LINK_KEYS.filter((k) => filled(d[k])).length;
+  const timeline = Array.isArray(d.timeline) ? d.timeline : [];
+  const memberships = timeline.filter((e) => {
+    if (!e || typeof e !== 'object') return false;
+    const entry = e as Record<string, unknown>;
+    return entry.type === 'membership' && entry.verification !== 'rejected';
+  }).length;
+  return { links, memberships };
 }

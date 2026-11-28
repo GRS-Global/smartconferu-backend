@@ -36,6 +36,8 @@ import type {
   DirectoryEntryResponse,
   PublicCfpPageResponse,
 } from './dto/cfp.dto.js';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.js';
 
 /** "ISBM 2027-28" → "isbm202728": the URL id of a conference. */
 export function slugFromAcronym(acronym: string): string {
@@ -53,6 +55,9 @@ const MAX_SLUG_SUFFIX = 50;
  */
 @Injectable()
 export class ConferencesService {
+  /** ALLOW_PAST_CONFERENCE_DATES (testing): a new conference may be for days that are over. */
+  private readonly allowPastDates: boolean;
+
   constructor(
     private readonly database: DatabaseService,
     private readonly conferences: ConferencesRepository,
@@ -60,7 +65,12 @@ export class ConferencesService {
     private readonly notifications: NotificationsService,
     private readonly emails: ConferenceEmailsService,
     private readonly audit: AuditService,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.allowPastDates = config.get('ALLOW_PAST_CONFERENCE_DATES', {
+      infer: true,
+    });
+  }
 
   /** Anyone signed in may ask for a conference; it starts waiting for a super admin. */
   async create(
@@ -635,6 +645,9 @@ export class ConferencesService {
     start: string | null | undefined,
     end: string | null | undefined,
   ): void {
+    if (this.allowPastDates) {
+      return; // testing: ALLOW_PAST_CONFERENCE_DATES
+    }
     const earliest = new Date(Date.now() - 86_400_000)
       .toISOString()
       .slice(0, 10);

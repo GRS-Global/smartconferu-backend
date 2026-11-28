@@ -71,7 +71,21 @@ const PAPER_SCHEMA: Schema = {
         type: 'object',
         properties: {
           name: { type: 'string' },
-          affiliation: { type: 'string' },
+          affiliation: {
+            type: 'string',
+            description:
+              'The institution or organisation only (e.g. "Indian Institute of Technology Bombay", "Google Research"). Leave out the department, school or faculty, the street, city, postcode and country: those go in their own fields.',
+          },
+          department: {
+            type: 'string',
+            description:
+              'Department, school, faculty or lab within the institution (e.g. "Department of Computer Science"), empty if none is written.',
+          },
+          city: {
+            type: 'string',
+            description:
+              "City of this author's affiliation (e.g. \"Mumbai\"), empty if it isn't written or can't be told from the address.",
+          },
           country: {
             type: 'string',
             description:
@@ -80,7 +94,15 @@ const PAPER_SCHEMA: Schema = {
           email: { type: 'string' },
           corresponding: { type: 'boolean' },
         },
-        required: ['name', 'affiliation', 'country', 'email', 'corresponding'],
+        required: [
+          'name',
+          'affiliation',
+          'department',
+          'city',
+          'country',
+          'email',
+          'corresponding',
+        ],
         additionalProperties: false,
       },
     },

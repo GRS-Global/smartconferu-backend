@@ -79,7 +79,14 @@ describe('The super-admin console', () => {
         title: 'A paper',
         abstract: 'An abstract.',
         authors: [
-          { name: 'Ada Author', email: author.email, corresponding: true },
+          {
+            affiliation: 'Test University',
+            city: 'Pune',
+            country: 'India',
+            name: 'Ada Author',
+            email: author.email,
+            corresponding: true,
+          },
         ],
       })
       .expect(201);

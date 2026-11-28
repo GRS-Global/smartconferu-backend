@@ -177,6 +177,8 @@ export function toSubmission(
           name: a.name,
           email: a.email,
           affiliation: a.affiliation,
+          department: a.department,
+          city: a.city,
           country: a.country,
           corresponding: a.isCorresponding,
           hasAccount: a.userId !== null,

@@ -243,7 +243,14 @@ describe('License requests and Activity Logs', () => {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
           authors: [
-            { name: 'Ada Author', email: s.author.email, corresponding: true },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Ada Author',
+              email: s.author.email,
+              corresponding: true,
+            },
           ],
         })
         .expect(201);
@@ -325,7 +332,14 @@ describe('License requests and Activity Logs', () => {
           title: 'Graph networks for protein folding',
           abstract: 'We show that graph networks fold proteins.',
           authors: [
-            { name: 'Ada Author', email: s.author.email, corresponding: true },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Ada Author',
+              email: s.author.email,
+              corresponding: true,
+            },
           ],
         })
         .expect(201);

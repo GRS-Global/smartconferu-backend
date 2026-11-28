@@ -115,7 +115,16 @@ describe('AI features (against a fake Claude and Voyage)', () => {
       .post(`/conferences/${conferenceId}/submissions`, {
         title: 'Graph networks for protein folding',
         abstract: 'We show that graph networks fold proteins.',
-        authors: [{ name: 'A', email: author.email, corresponding: true }],
+        authors: [
+          {
+            affiliation: 'Test University',
+            city: 'Pune',
+            country: 'India',
+            name: 'A',
+            email: author.email,
+            corresponding: true,
+          },
+        ],
       })
       .expect(201);
     const submissionId = paper.body.id as string;
@@ -141,6 +150,7 @@ describe('AI features (against a fake Claude and Voyage)', () => {
       keywords: ['GNN'],
       authors: [
         {
+          city: 'Pune',
           name: 'Ada',
           affiliation: 'MIT',
           country: 'United States',

@@ -85,7 +85,16 @@ describe('Background jobs', () => {
       .post(`/conferences/${conferenceId}/submissions`, {
         title: 'A paper',
         abstract: 'An abstract.',
-        authors: [{ name: 'A', email: author.email, corresponding: true }],
+        authors: [
+          {
+            affiliation: 'Test University',
+            city: 'Pune',
+            country: 'India',
+            name: 'A',
+            email: author.email,
+            corresponding: true,
+          },
+        ],
       })
       .expect(201);
     await t.db.query(

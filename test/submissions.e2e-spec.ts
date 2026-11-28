@@ -89,15 +89,35 @@ describe('Submissions, screening and the email queue', () => {
     return id;
   }
 
+  /** The first two authors must give affiliation, city and country: fill in a default where a test leaves them out. */
+  const withPlace = <T extends object>(authors: T[]) =>
+    authors.map((a, i) =>
+      i < 2
+        ? {
+            affiliation: 'Test University',
+            city: 'Pune',
+            country: 'India',
+            ...a,
+          }
+        : a,
+    );
   const paper = (
-    authors: { name: string; email: string; corresponding?: boolean }[],
+    authors: {
+      name: string;
+      email: string;
+      corresponding?: boolean;
+      affiliation?: string;
+      department?: string;
+      city?: string;
+      country?: string;
+    }[],
     extra: object = {},
   ) => ({
     title: 'Graph networks for protein folding',
     abstract: 'We show that graph networks fold proteins.',
     keywords: ['GNN', 'proteins'],
     track: 'AI Track',
-    authors,
+    authors: withPlace(authors),
     ...extra,
   });
 
@@ -130,7 +150,15 @@ describe('Submissions, screening and the email queue', () => {
       .post(
         `/conferences/${conferenceId}/submissions`,
         paper([
-          { name: 'Ada Author', email: author.email, corresponding: true },
+          {
+            name: 'Ada Author',
+            email: author.email,
+            corresponding: true,
+            affiliation: 'IIT Bombay',
+            department: 'Department of Computer Science',
+            city: 'Mumbai',
+            country: 'India',
+          },
           { name: 'Cole Coauthor', email: coAuthor.email.toUpperCase() },
           { name: 'Nina New', email: 'nina@new.example' },
         ]),
@@ -154,7 +182,14 @@ describe('Submissions, screening and the email queue', () => {
         can: { editDetails: true, editAuthors: true, withdraw: true },
       });
       expect(submission.authors).toEqual([
-        expect.objectContaining({ email: author.email, hasAccount: true }),
+        expect.objectContaining({
+          email: author.email,
+          hasAccount: true,
+          affiliation: 'IIT Bombay',
+          department: 'Department of Computer Science',
+          city: 'Mumbai',
+          country: 'India',
+        }),
         expect.objectContaining({ hasAccount: true, corresponding: false }),
         expect.objectContaining({
           email: 'nina@new.example',
@@ -198,6 +233,45 @@ describe('Submissions, screening and the email queue', () => {
 
       expect(await bell(chair.id)).toContain('new_submission');
       expect(await bell(coAuthor.id)).toEqual(['coauthor_added']);
+    });
+
+    it('needs affiliation, city and country from the first two authors only', async () => {
+      const chair = await person({ firstName: 'Carla', lastName: 'Chair' });
+      const author = await person({ firstName: 'Ada', lastName: 'Author' });
+      const conferenceId = await openConference(chair);
+      const place = {
+        affiliation: 'IIT Bombay',
+        city: 'Mumbai',
+        country: 'India',
+      };
+      const me = {
+        name: 'Ada Author',
+        email: author.email,
+        corresponding: true,
+      };
+      const send = (authors: object[]) =>
+        as(author.token).post(`/conferences/${conferenceId}/submissions`, {
+          ...paper([]),
+          authors,
+        });
+
+      const noCity = await send([
+        { ...me, ...place },
+        {
+          name: 'Ben Two',
+          email: 'ben@two.example',
+          affiliation: 'MIT',
+          country: 'USA',
+        },
+      ]).expect(400);
+      expect(noCity.body.message).toMatch(/Author 2 needs city/);
+
+      // Authors 3 and on may leave it all out.
+      await send([
+        { ...me, ...place },
+        { name: 'Ben Two', email: 'ben@two.example', ...place },
+        { name: 'Cy Three', email: 'cy@three.example' },
+      ]).expect(201);
     });
 
     it('numbers papers per conference', async () => {
@@ -534,8 +608,21 @@ describe('Submissions, screening and the email queue', () => {
       const res = await as(author.token)
         .put(`/submissions/${submission.id}/authors`, {
           authors: [
-            { name: 'Ada Author', email: author.email, corresponding: true },
-            { name: 'Cole Coauthor', email: coAuthor.email },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Ada Author',
+              email: author.email,
+              corresponding: true,
+            },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Cole Coauthor',
+              email: coAuthor.email,
+            },
             { name: 'Pia Plus', email: 'pia@new.example', corresponding: true },
           ],
         })
@@ -560,7 +647,14 @@ describe('Submissions, screening and the email queue', () => {
       await as(coAuthor.token)
         .put(`/submissions/${submission.id}/authors`, {
           authors: [
-            { name: 'Cole', email: coAuthor.email, corresponding: true },
+            {
+              affiliation: 'Test University',
+              city: 'Pune',
+              country: 'India',
+              name: 'Cole',
+              email: coAuthor.email,
+              corresponding: true,
+            },
           ],
         })
         .expect(403);

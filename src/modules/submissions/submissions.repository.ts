@@ -38,6 +38,8 @@ export interface NewAuthor {
   name: string;
   email: string;
   affiliation: string | null;
+  department: string | null;
+  city: string | null;
   country: string | null;
   corresponding: boolean;
 }
@@ -241,6 +243,8 @@ export class SubmissionsRepository {
         name: author.name,
         email: author.email,
         affiliation: author.affiliation,
+        department: author.department,
+        city: author.city,
         country: author.country,
         isCorresponding: author.corresponding,
       };

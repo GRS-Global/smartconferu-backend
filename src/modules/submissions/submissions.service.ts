@@ -42,7 +42,10 @@ import {
 } from './submissions.repository.js';
 import { appPaths } from '../../core/http/app-paths.js';
 
-/** One email per author, at least one corresponding. */
+/** How many authors (from the top) must give affiliation, city and country. Same number in the frontend. */
+const AUTHORS_WITH_PLACE = 2;
+
+/** One email per author, at least one corresponding, the first two with their place. */
 function checkAuthors(authors: readonly AuthorDto[]): NewAuthor[] {
   const seen = new Set<string>();
   for (const author of authors) {
@@ -57,10 +60,25 @@ function checkAuthors(authors: readonly AuthorDto[]): NewAuthor[] {
   if (!authors.some((a) => a.corresponding)) {
     throw AppException.validation('Mark at least one corresponding author.');
   }
+  // The first two authors must say where they are; the others may leave it out.
+  authors.slice(0, AUTHORS_WITH_PLACE).forEach((a, i) => {
+    const missing = [
+      a.affiliation?.trim() ? null : 'affiliation',
+      a.city?.trim() ? null : 'city',
+      a.country?.trim() ? null : 'country',
+    ].filter((x): x is string => x !== null);
+    if (missing.length > 0) {
+      throw AppException.validation(
+        `Author ${i + 1} needs ${missing.join(', ')} — the first ${AUTHORS_WITH_PLACE} authors must give their affiliation, city and country.`,
+      );
+    }
+  });
   return authors.map((a) => ({
     name: a.name,
     email: a.email,
     affiliation: a.affiliation ?? null,
+    department: a.department ?? null,
+    city: a.city ?? null,
     country: a.country ?? null,
     corresponding: a.corresponding ?? false,
   }));
