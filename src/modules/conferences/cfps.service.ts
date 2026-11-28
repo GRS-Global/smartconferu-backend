@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../../config/env.js';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
@@ -44,7 +46,13 @@ export class CfpsService {
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
     private readonly emails: ConferenceEmailsService,
-  ) {}
+    config: ConfigService<Env, true>,
+  ) {
+    this.autoApprove = config.get('CFP_AUTO_APPROVE', { infer: true });
+  }
+
+  /** Testing switch: publishing opens the CFP at once, no Super Admin approval. */
+  private readonly autoApprove: boolean;
 
   /** The team sees the CFP in any state. */
   async get(user: AuthUser, conferenceId: string): Promise<CfpResponse> {
@@ -138,6 +146,16 @@ export class CfpsService {
         });
         await this.record(tx, 'cfp.reopened', user, conferenceId, client);
         return toCfp(row);
+      }
+      if (this.autoApprove) {
+        const live = await this.conferences.updateCfp(tx, conferenceId, {
+          status: 'published',
+          submittedAt: now,
+          decidedAt: now,
+          adminNote: null,
+        });
+        await this.record(tx, 'cfp.approved', user, conferenceId, client);
+        return toCfp(live);
       }
       const row = await this.conferences.updateCfp(tx, conferenceId, {
         status: 'in_review',

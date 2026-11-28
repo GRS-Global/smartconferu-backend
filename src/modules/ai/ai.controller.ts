@@ -25,6 +25,7 @@ import {
   PaperMetadataDto,
   ReviewEnhanceDto,
   ScreeningAiDto,
+  SummaryDto,
   TopicsDto,
   PaperSummaryResponse,
 } from './dto/ai.dto.js';
@@ -77,6 +78,16 @@ export class AiController {
   @ApiOkResponse(anyObject)
   topics(@CurrentUser() user: AuthUser, @Body() dto: TopicsDto) {
     return this.tools.topics(user, dto);
+  }
+
+  @Post('summary')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Write a one-line summary of a conference (nothing is saved)',
+  })
+  @ApiOkResponse(anyObject)
+  summary(@CurrentUser() user: AuthUser, @Body() dto: SummaryDto) {
+    return this.tools.summary(user, dto);
   }
 
   @Post('review-enhance')

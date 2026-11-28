@@ -243,6 +243,7 @@ export class DecisionsService {
           DEFAULT_COLOR,
         outcome: t.outcome,
         description: t.description ?? null,
+        authorLabel: t.authorLabel ?? null,
         position,
         ...(t.id ? { id: t.id } : {}),
       }));

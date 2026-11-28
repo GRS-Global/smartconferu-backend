@@ -136,6 +136,11 @@ const envSchema = z.object({
    */
   ALLOW_PAST_CONFERENCE_DATES: bool.default(false),
   /**
+   * Testing only: "Publish" on a Call for Papers opens it at once, without waiting for a Super Admin's
+   * approval, so a chair can share the submission link straight away. Keep false in production.
+   */
+  CFP_AUTO_APPROVE: bool.default(false),
+  /**
    * Development only: put the admin sign-in code in the sign-in response (`devCode`) so the console
    * can fill it in while no real emails are sent. Refused in production.
    */

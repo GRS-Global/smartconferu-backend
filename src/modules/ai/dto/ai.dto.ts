@@ -254,3 +254,40 @@ export class PaperSummaryResponse {
   })
   upToDate: boolean;
 }
+
+export class SummaryDto {
+  @ApiPropertyOptional({ maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  title?: string;
+
+  @ApiPropertyOptional({ maxLength: 20000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20000)
+  about?: string;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  primaryArea?: string;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  secondaryArea?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Topics already chosen.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  topics?: string[];
+}

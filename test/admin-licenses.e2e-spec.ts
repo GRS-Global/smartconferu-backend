@@ -77,12 +77,24 @@ describe('Admin › conference licenses', () => {
     const list = await as(admin.token).get('/admin/conferences').expect(200);
     const row = list.body.find((c: { id: string }) => c.id === id);
     expect(row).toMatchObject({ papers: 0, onTrial: true });
+    // One month after the conference ends (2027-06-03).
+    expect(row.licenseExpiry).toBe('2027-07-03');
+  });
+
+  it('runs a license 30 days from creation while the conference has no end date', async () => {
+    const { admin, chair } = await setup();
+    const bare = await as(chair.token)
+      .post('/conferences', { acronym: 'NOD 2027', title: 'No Dates 2027' })
+      .expect(201);
+    const list = await as(admin.token).get('/admin/conferences').expect(200);
+    const row = list.body.find((c: { id: string }) => c.id === bare.body.id);
     expect(row.licenseExpiry).toBe(inDays(30));
   });
 
   it('"Extend license" moves the date, ends the trial and tells the chairs', async () => {
     const { admin, chair, id } = await setup();
-    const until = inDays(200);
+    // Later than the license end the conference starts with (2027-07-03).
+    const until = '2027-12-31';
     const ask = await as(admin.token)
       .post(`/admin/conferences/${id}/license`, { expiry: until })
       .expect(403);

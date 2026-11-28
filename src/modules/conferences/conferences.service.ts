@@ -38,6 +38,7 @@ import type {
 } from './dto/cfp.dto.js';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../config/env.js';
+import { DEFAULT_SUBMISSION_GUIDELINES } from './default-guidelines.js';
 
 /** "ISBM 2027-28" → "isbm202728": the URL id of a conference. */
 export function slugFromAcronym(acronym: string): string {
@@ -580,11 +581,16 @@ export class ConferencesService {
     const guidelines = obj(settings.submissionPolicy).guidelines;
     return {
       tracks,
+      tracksOn: obj(settings.submissionPolicy).tracksOn !== false,
       presentationTypes: strings(settings.presentationTypes),
       extras: Array.isArray(extras)
         ? (extras as Record<string, unknown>[])
         : [],
-      guidelines: typeof guidelines === 'string' ? guidelines : '',
+      // Never saved, or saved empty: the general guidelines.
+      guidelines:
+        typeof guidelines === 'string' && guidelines.trim() !== ''
+          ? guidelines
+          : DEFAULT_SUBMISSION_GUIDELINES,
     };
   }
 

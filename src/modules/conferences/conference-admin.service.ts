@@ -42,6 +42,7 @@ const pageText = (content: unknown): string | null => {
 const licenseOf = (row: {
   details: unknown;
   createdAt: Date;
+  endDate?: string | null;
   suspendedAt: Date | null;
 }) => {
   const { expiry, onTrial } = licenseExpiryOf(row);

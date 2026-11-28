@@ -4,6 +4,7 @@ import {
   type TestApp,
   type TestUser,
 } from './support/test-app.js';
+import { DEFAULT_SUBMISSION_GUIDELINES } from '../src/modules/conferences/default-guidelines.js';
 
 /** The endpoints added for the frontend: slug-or-UUID, paper labels, dashboard, chair overview, uploads. */
 describe('Frontend connection helpers', () => {
@@ -125,9 +126,10 @@ describe('Frontend connection helpers', () => {
         .expect(200);
       expect(bare.body).toEqual({
         tracks: [],
+        tracksOn: true,
         presentationTypes: [],
         extras: [],
-        guidelines: '',
+        guidelines: DEFAULT_SUBMISSION_GUIDELINES,
       });
       await http()
         .patch(api(`/conferences/${conf.id}/settings`))
@@ -163,6 +165,17 @@ describe('Frontend connection helpers', () => {
       ]);
       expect(form.body.extras).toHaveLength(1);
       expect(form.body.guidelines).toBe('Max 10 pages.');
+      expect(form.body.tracksOn).toBe(true);
+      // Tracks switched off: the form says so.
+      await http()
+        .patch(api(`/conferences/${conf.id}/settings`))
+        .set('Authorization', `Bearer ${chair.token}`)
+        .send({ settings: { submissionPolicy: { tracksOn: false } } })
+        .expect(200);
+      const off = await http()
+        .get(api(`/public/conferences/${conf.slug}/submission-form`))
+        .expect(200);
+      expect(off.body.tracksOn).toBe(false);
       // The conference record itself stays closed to someone with no part in it, so this public route is how an author reads the form.
       const stranger = await person();
       await as(stranger.token).get(`/conferences/${conf.slug}`).expect(404);

@@ -23,26 +23,39 @@ import type {
   RequestLicenseDto,
 } from './dto/license.dto.js';
 
-/** A new conference's license runs this long from the day it was created, until a Super Admin moves it. */
+/** With no end date yet, a new conference's license runs this long from the day it was created. */
 const TRIAL_DAYS = 30;
 
 type RequestRow = typeof licenseRequests.$inferSelect;
 
-/** The conference's license end: what a Super Admin set, else 30 days from its creation (the trial). */
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The conference's license end: what a Super Admin set; otherwise one month after the
+ * conference ends; with no end date yet, 30 days from its creation.
+ */
 export function licenseExpiryOf(conference: {
   details: unknown;
   createdAt: Date;
+  endDate?: string | Date | null;
 }): {
   expiry: string;
   onTrial: boolean;
 } {
   const set = (conference.details as Record<string, unknown>).licenseExpiry;
-  return typeof set === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(set)
-    ? { expiry: set, onTrial: false }
-    : {
-        expiry: addDays(day(conference.createdAt), TRIAL_DAYS),
-        onTrial: true,
-      };
+  if (typeof set === 'string' && ISO_DAY.test(set)) {
+    return { expiry: set, onTrial: false };
+  }
+  const end =
+    conference.endDate instanceof Date
+      ? day(conference.endDate)
+      : (conference.endDate ?? '').slice(0, 10);
+  return {
+    expiry: ISO_DAY.test(end)
+      ? addMonth(end)
+      : addDays(day(conference.createdAt), TRIAL_DAYS),
+    onTrial: true,
+  };
 }
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
@@ -50,6 +63,12 @@ const addDays = (isoDay: string, days: number) => {
   const d = new Date(`${isoDay}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return day(d);
+};
+/** One calendar month later; a day the next month lacks becomes its last day (31 Jan -> 28/29 Feb). */
+export const addMonth = (isoDay: string) => {
+  const [y, m, dd] = isoDay.split('-').map(Number) as [number, number, number];
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return day(new Date(Date.UTC(y, m, Math.min(dd, last))));
 };
 
 function toResponse(row: RequestRow): LicenseRequestResponse {
@@ -85,7 +104,11 @@ export class LicenseService {
     return access;
   }
 
-  private expiryOf(conference: { details: unknown; createdAt: Date }): string {
+  private expiryOf(conference: {
+    details: unknown;
+    createdAt: Date;
+    endDate?: string | null;
+  }): string {
     return licenseExpiryOf(conference).expiry;
   }
 
@@ -96,6 +119,7 @@ export class LicenseService {
         acronym: conferences.acronym,
         details: conferences.details,
         createdAt: conferences.createdAt,
+        endDate: conferences.endDate,
         status: conferences.status,
       })
       .from(conferences)

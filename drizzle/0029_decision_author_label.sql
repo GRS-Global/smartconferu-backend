@@ -1,0 +1,1 @@
+ALTER TABLE "decision_types" ADD COLUMN "author_label" text;

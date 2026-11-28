@@ -338,6 +338,11 @@ export class PublicConferenceResponse {
 /** What the New Submission page shows: the chair's choices for the form (empty lists = the app's defaults). */
 export class SubmissionFormResponse {
   @ApiProperty({ type: [String] }) tracks: string[];
+  @ApiProperty({
+    description:
+      'False when the chair switched Tracks off: the form has no track field.',
+  })
+  tracksOn: boolean;
   @ApiProperty({ type: [String] }) presentationTypes: string[];
   @ApiProperty({
     description:
@@ -457,7 +462,8 @@ export class AdminCfpResponse extends AdminConferenceResponse {
   @ApiProperty({
     nullable: true,
     type: String,
-    description: 'The page the chair chose: <APP_URL>/cfp/<cfpPage> (APP_URL = the web app address).',
+    description:
+      'The page the chair chose: <APP_URL>/cfp/<cfpPage> (APP_URL = the web app address).',
   })
   cfpPage: string | null;
 

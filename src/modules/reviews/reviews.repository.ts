@@ -800,6 +800,7 @@ export class ReviewsRepository {
           color: row.color,
           outcome: row.outcome,
           description: row.description,
+          authorLabel: row.authorLabel,
           position: row.position,
         })
         .where(
