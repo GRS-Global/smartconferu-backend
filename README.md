@@ -251,6 +251,9 @@ How it works:
   An author whose email has an account
   is linked at once, anyone else when they sign up; a linked author has "claimed" the paper. A
   chair who submitted for an author can edit the paper only until an author claims it.
+- **Own conference:** the people running a conference (its creator, chairs and track chairs) can't
+  submit a paper of their own to it: `403 OWN_CONFERENCE`. They add papers for authors with
+  Submit on behalf (`onBehalf: true`). A super admin isn't on the team, so this doesn't apply to them.
 - **Titles:** one paper per title in a conference (withdrawn papers aside; case, spaces and
   punctuation ignored), on submit and on a title change: `409 DUPLICATE_TITLE`, `details` naming
   `title`. `GET …/submissions/duplicate-check` is the same check for the form's live warning.

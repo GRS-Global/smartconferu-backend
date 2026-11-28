@@ -29,6 +29,8 @@ export const ErrorCode = {
   CONFLICT: 'CONFLICT',
   /** Another paper in the conference already has this title (submit, or change a title). */
   DUPLICATE_TITLE: 'DUPLICATE_TITLE',
+  /** A chair (or the creator) tried to submit their own paper to the conference they run. */
+  OWN_CONFERENCE: 'OWN_CONFERENCE',
   BUSINESS_RULE: 'BUSINESS_RULE',
   RATE_LIMITED: 'RATE_LIMITED',
   NOT_READY: 'NOT_READY',

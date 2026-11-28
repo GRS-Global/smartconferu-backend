@@ -218,6 +218,24 @@ describe('access rules: conference', () => {
     });
   });
 
+  describe('organizesConference', () => {
+    it('is the creator, a chair or a track chair: they may not submit their own paper', () => {
+      expect(rules.organizesConference(chair())).toBe(true);
+      expect(
+        rules.organizesConference(chair({ activeRoles: ['track_chair'] })),
+      ).toBe(true);
+      expect(rules.organizesConference(conference({ isCreator: true }))).toBe(
+        true,
+      );
+    });
+
+    it('is not a reviewer, an outsider or a super admin', () => {
+      expect(rules.organizesConference(reviewerMember)).toBe(false);
+      expect(rules.organizesConference(outsider)).toBe(false);
+      expect(rules.organizesConference(superAdmin)).toBe(false);
+    });
+  });
+
   it('assigns active reviewers now and invited ones when they accept', () => {
     expect(
       rules.reviewerAssignment({ role: 'reviewer', status: 'active' }),

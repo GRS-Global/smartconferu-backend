@@ -173,6 +173,14 @@ export class SubmissionsService {
           "This conference isn't approved, so no paper can be added to it.",
         );
       }
+      // The people running a conference don't send their own papers to it.
+      if (!onBehalf && rules.organizesConference(access)) {
+        throw new AppException(
+          HttpStatus.FORBIDDEN,
+          ErrorCode.OWN_CONFERENCE,
+          "You're a chair of this conference, so you can't submit your own paper to it. To add a paper for an author, use Submit on behalf.",
+        );
+      }
       if (
         !onBehalf &&
         !rules.canSubmit(access, {

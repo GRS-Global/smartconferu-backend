@@ -247,6 +247,20 @@ export function canSubmitOnBehalf(access: ConferenceAccess): boolean {
 }
 
 /**
+ * Runs the conference: its creator, or an active chair or track chair. They may not send a paper
+ * of their own to it (the CFP submission link); they add papers for authors with Submit on behalf.
+ * A super admin is not on the conference's team, so this doesn't count them.
+ */
+export function organizesConference(access: ConferenceAccess): boolean {
+  return (
+    access.isCreator ||
+    access.activeRoles.some((r) =>
+      (CHAIR_ROLES as readonly MemberRole[]).includes(r),
+    )
+  );
+}
+
+/**
  * Whether a team member can be given a paper to review: active reviewers get a normal assignment,
  * invited ones a pending assignment that starts when they accept, anyone else none.
  * Replaces the checks in: assignments: chairs manage, pending assignments: chairs manage.

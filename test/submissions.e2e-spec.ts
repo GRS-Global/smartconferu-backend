@@ -298,16 +298,55 @@ describe('Submissions, screening and the email queue', () => {
         .post(`/conferences/${conferenceId}/submissions`, body)
         .expect(422);
       expect(refused.body.message).toMatch(/Call for Papers isn't published/);
-      // A chair's own paper (not on anyone's behalf) still waits for the CFP.
+      // A chair never sends their own paper to their conference (on anyone's behalf only).
       await as(chair.token)
         .post(`/conferences/${conferenceId}/submissions`, body)
-        .expect(422);
+        .expect(403);
       await as(chair.token)
         .post(`/conferences/${conferenceId}/submissions`, {
           ...body,
           onBehalf: true,
         })
         .expect(201);
+    });
+
+    it("refuses a chair's own paper to their conference (the CFP link); on behalf still works", async () => {
+      const chair = await person();
+      const author = await person();
+      const conferenceId = await openConference(chair);
+      const url = `/conferences/${conferenceId}/submissions`;
+      const own = await as(chair.token)
+        .post(
+          url,
+          paper([
+            { name: 'Carla Chair', email: chair.email, corresponding: true },
+          ]),
+        )
+        .expect(403);
+      expect(own.body).toMatchObject({
+        code: 'OWN_CONFERENCE',
+        message:
+          "You're a chair of this conference, so you can't submit your own paper to it. To add a paper for an author, use Submit on behalf.",
+      });
+      const count = async () =>
+        (
+          await t.db.query<{ n: number }>(
+            'select count(*)::int n from submissions where conference_id = $1',
+            [conferenceId],
+          )
+        ).rows[0].n;
+      expect(await count()).toBe(0);
+
+      const forAuthor = paper([
+        { name: 'Ada', email: author.email, corresponding: true },
+      ]);
+      await as(chair.token)
+        .post(url, { ...forAuthor, onBehalf: true })
+        .expect(201);
+      await as(author.token)
+        .post(url, { ...forAuthor, title: 'An author’s own paper' })
+        .expect(201);
+      expect(await count()).toBe(2);
     });
 
     it('lets a chair submit on behalf in an archived conference with a closed CFP, but not in one never approved', async () => {
