@@ -89,18 +89,14 @@ describe('Submissions, screening and the email queue', () => {
     return id;
   }
 
-  /** The first two authors must give affiliation, city and country: fill in a default where a test leaves them out. */
+  /** Every author must give affiliation and country: fill in a default where a test leaves them out. */
   const withPlace = <T extends object>(authors: T[]) =>
-    authors.map((a, i) =>
-      i < 2
-        ? {
-            affiliation: 'Test University',
-            city: 'Pune',
-            country: 'India',
-            ...a,
-          }
-        : a,
-    );
+    authors.map((a) => ({
+      affiliation: 'Test University',
+      city: 'Pune',
+      country: 'India',
+      ...a,
+    }));
   const paper = (
     authors: {
       name: string;
@@ -235,7 +231,7 @@ describe('Submissions, screening and the email queue', () => {
       expect(await bell(coAuthor.id)).toEqual(['coauthor_added']);
     });
 
-    it('needs affiliation, city and country from the first two authors only', async () => {
+    it('needs affiliation and country (not the city) from every author', async () => {
       const chair = await person({ firstName: 'Carla', lastName: 'Chair' });
       const author = await person({ firstName: 'Ada', lastName: 'Author' });
       const conferenceId = await openConference(chair);
@@ -249,29 +245,95 @@ describe('Submissions, screening and the email queue', () => {
         email: author.email,
         corresponding: true,
       };
+      let n = 0;
       const send = (authors: object[]) =>
         as(author.token).post(`/conferences/${conferenceId}/submissions`, {
           ...paper([]),
+          title: `Place rule paper ${++n}`,
           authors,
         });
 
-      const noCity = await send([
+      const noCountry = await send([
         { ...me, ...place },
+        {
+          name: 'Ben Two',
+          email: 'ben@two.example',
+          affiliation: 'MIT',
+        },
+      ]).expect(400);
+      expect(noCountry.body.message).toMatch(/Author 2 needs country/);
+
+      // The city is optional, even for the first two.
+      await send([
+        { ...me, affiliation: 'IIT Bombay', country: 'India' },
         {
           name: 'Ben Two',
           email: 'ben@two.example',
           affiliation: 'MIT',
           country: 'USA',
         },
-      ]).expect(400);
-      expect(noCity.body.message).toMatch(/Author 2 needs city/);
+      ]).expect(201);
 
-      // Authors 3 and on may leave it all out.
-      await send([
+      // The third author too: nobody may leave the affiliation out.
+      const third = await send([
         { ...me, ...place },
         { name: 'Ben Two', email: 'ben@two.example', ...place },
         { name: 'Cy Three', email: 'cy@three.example' },
+      ]).expect(400);
+      expect(third.body.message).toMatch(/Author 3 needs affiliation, country/);
+      await send([
+        { ...me, ...place },
+        { name: 'Ben Two', email: 'ben@two.example', ...place },
+        { name: 'Cy Three', email: 'cy@three.example', ...place },
       ]).expect(201);
+    });
+
+    it('keeps one entry per author with all of their affiliations (primary first)', async () => {
+      const chair = await person({ firstName: 'Carla', lastName: 'Chair' });
+      const author = await person({ firstName: 'Ada', lastName: 'Author' });
+      const conferenceId = await openConference(chair);
+      const created = await as(author.token)
+        .post(`/conferences/${conferenceId}/submissions`, {
+          ...paper([]),
+          title: 'Two affiliations',
+          authors: [
+            {
+              name: 'Ada Author',
+              email: author.email,
+              corresponding: true,
+              affiliation: 'IIT Bombay',
+              country: 'India',
+              otherAffiliations: [
+                { affiliation: 'MIT', city: 'Boston', country: 'USA' },
+                { affiliation: '   ' },
+              ],
+            },
+            {
+              name: 'Ben Two',
+              email: 'ben@two.example',
+              affiliation: 'MIT',
+              country: 'USA',
+            },
+          ],
+        })
+        .expect(201);
+      const shown = await as(author.token)
+        .get(`/submissions/${created.body.id}`)
+        .expect(200);
+      expect(shown.body.authors).toHaveLength(2);
+      expect(shown.body.authors[0]).toMatchObject({
+        name: 'Ada Author',
+        affiliation: 'IIT Bombay',
+        otherAffiliations: [
+          {
+            affiliation: 'MIT',
+            department: null,
+            city: 'Boston',
+            country: 'USA',
+          },
+        ],
+      });
+      expect(shown.body.authors[1].otherAffiliations).toEqual([]);
     });
 
     it('numbers papers per conference', async () => {
@@ -667,7 +729,13 @@ describe('Submissions, screening and the email queue', () => {
               name: 'Cole Coauthor',
               email: coAuthor.email,
             },
-            { name: 'Pia Plus', email: 'pia@new.example', corresponding: true },
+            {
+              affiliation: 'Test University',
+              country: 'India',
+              name: 'Pia Plus',
+              email: 'pia@new.example',
+              corresponding: true,
+            },
           ],
         })
         .expect(200);

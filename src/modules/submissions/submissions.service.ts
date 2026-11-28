@@ -42,15 +42,12 @@ import {
 } from './submissions.repository.js';
 import { appPaths } from '../../core/http/app-paths.js';
 
-/** How many authors (from the top) must give affiliation, city and country. Same number in the frontend. */
-const AUTHORS_WITH_PLACE = 2;
-
 /** How many authors must give an email when an author submits (fewer when the paper has fewer authors). Same number in the frontend. */
 const AUTHOR_EMAILS_REQUIRED = 2;
 
 /**
  * The author list's rules. Each email once; at least one corresponding author, each with an email;
- * the first two authors with their place. Other emails may come later ("Will add later"), but an
+ * every author with their affiliation and country. Other emails may come later ("Will add later"), but an
  * author submitting gives at least two (their own and a co-author's) when the paper has co-authors.
  * A chair submitting on an author's behalf needs only the corresponding authors' emails.
  */
@@ -86,16 +83,15 @@ function checkAuthors(
       'Give the email of at least one co-author as well as your own. The others can be added later.',
     );
   }
-  // The first two authors must say where they are; the others may leave it out.
-  authors.slice(0, AUTHORS_WITH_PLACE).forEach((a, i) => {
+  // Every author must say where they are: affiliation and country (the city is optional).
+  authors.forEach((a, i) => {
     const missing = [
       a.affiliation?.trim() ? null : 'affiliation',
-      a.city?.trim() ? null : 'city',
       a.country?.trim() ? null : 'country',
     ].filter((x): x is string => x !== null);
     if (missing.length > 0) {
       throw AppException.validation(
-        `Author ${i + 1} needs ${missing.join(', ')} — the first ${AUTHORS_WITH_PLACE} authors must give their affiliation, city and country.`,
+        `Author ${i + 1} needs ${missing.join(', ')} — every author must give their affiliation and country (the city is optional).`,
       );
     }
   });
@@ -106,6 +102,14 @@ function checkAuthors(
     department: a.department ?? null,
     city: a.city ?? null,
     country: a.country ?? null,
+    otherAffiliations: (a.otherAffiliations ?? [])
+      .map((p) => ({
+        affiliation: p.affiliation ?? null,
+        department: p.department ?? null,
+        city: p.city ?? null,
+        country: p.country ?? null,
+      }))
+      .filter((p) => p.affiliation !== null),
     corresponding: a.corresponding ?? false,
   }));
 }

@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import { authoredBy } from '../../core/rbac/authorship.js';
 import type { Executor, Tx } from '../../core/database/database.types.js';
 import {
+  type AuthorPlace,
   cfps,
   conferences,
   decisionEvents,
@@ -43,6 +44,8 @@ export interface NewAuthor {
   department: string | null;
   city: string | null;
   country: string | null;
+  /** Further affiliations, when the author belongs to several institutions. */
+  otherAffiliations: AuthorPlace[];
   corresponding: boolean;
 }
 
@@ -276,6 +279,7 @@ export class SubmissionsRepository {
         department: author.department,
         city: author.city,
         country: author.country,
+        otherAffiliations: author.otherAffiliations,
         isCorresponding: author.corresponding,
       };
       const userId =

@@ -84,6 +84,7 @@ export async function createTestApp(
     EMAIL_ONLY_TO_ROLES: '',
     // The approval flow is the default under test; the auto-approve default is tested on its own.
     CFP_AUTO_APPROVE: 'false',
+    ALLOW_PAST_CONFERENCE_DATES: 'false',
     MFA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     GOOGLE_CLIENT_ID: 'google-client',
     GOOGLE_CLIENT_SECRET: 'google-secret',

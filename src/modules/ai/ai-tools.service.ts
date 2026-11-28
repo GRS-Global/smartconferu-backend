@@ -92,6 +92,22 @@ const PAPER_SCHEMA: Schema = {
             description:
               'Country of this author\'s affiliation, in English (e.g. "India", "United States"). If it isn\'t written, infer it from the institution, city or address, or the email\'s country domain; leave empty only if there is no clue at all.',
           },
+          otherAffiliations: {
+            type: 'array',
+            description:
+              'Only when the paper gives this author more than one affiliation (for example superscripts 1 and 2 against the same name): the second, third… affiliations, each with the same four fields. The first affiliation goes in the fields above. One entry per person: never list the same author twice because they have two affiliations. Empty when there is just one.',
+            items: {
+              type: 'object',
+              properties: {
+                affiliation: { type: 'string' },
+                department: { type: 'string' },
+                city: { type: 'string' },
+                country: { type: 'string' },
+              },
+              required: ['affiliation', 'department', 'city', 'country'],
+              additionalProperties: false,
+            },
+          },
           email: { type: 'string' },
           corresponding: {
             type: 'boolean',
@@ -105,6 +121,7 @@ const PAPER_SCHEMA: Schema = {
           'department',
           'city',
           'country',
+          'otherAffiliations',
           'email',
           'corresponding',
         ],
@@ -115,6 +132,71 @@ const PAPER_SCHEMA: Schema = {
   required: ['title', 'abstract', 'keywords', 'authors'],
   additionalProperties: false,
 };
+
+/**
+ * One person is one author, however many affiliations they have. If the model still lists a name twice
+ * (once per affiliation), the entries are joined: the first keeps its place as the primary affiliation
+ * and the others' affiliations follow it in `otherAffiliations`.
+ */
+export function mergeRepeatedAuthors(
+  paper: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!Array.isArray(paper.authors)) return paper;
+  const key = (name: unknown) =>
+    String(typeof name === 'string' ? name : '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  const place = (a: Record<string, unknown>) => ({
+    affiliation: String(a.affiliation ?? '').trim(),
+    department: String(a.department ?? '').trim(),
+    city: String(a.city ?? '').trim(),
+    country: String(a.country ?? '').trim(),
+  });
+  const same = (a: ReturnType<typeof place>, b: ReturnType<typeof place>) =>
+    a.affiliation.toLowerCase() === b.affiliation.toLowerCase();
+  const merged: Array<Record<string, unknown>> = [];
+  const seen = new Map<string, Record<string, unknown>>();
+  for (const raw of paper.authors as Array<Record<string, unknown>>) {
+    const author = { ...raw };
+    const own = Array.isArray(author.otherAffiliations)
+      ? (author.otherAffiliations as Array<Record<string, unknown>>)
+      : [];
+    // Their own list, without empty entries, repeats, or the primary affiliation again.
+    const extra: Array<ReturnType<typeof place>> = [];
+    for (const p of own.map(place)) {
+      if (
+        p.affiliation &&
+        !same(p, place(author)) &&
+        !extra.some((q) => same(p, q))
+      ) {
+        extra.push(p);
+      }
+    }
+    author.otherAffiliations = extra;
+    const id = key(author.name);
+    const first = id ? seen.get(id) : undefined;
+    if (!first) {
+      if (id) seen.set(id, author);
+      merged.push(author);
+      continue;
+    }
+    // Same person again: keep their extra affiliations on the first entry.
+    const mine = [
+      place(author),
+      ...(author.otherAffiliations as Array<ReturnType<typeof place>>),
+    ];
+    const list = first.otherAffiliations as Array<ReturnType<typeof place>>;
+    for (const p of mine) {
+      if (!p.affiliation) continue;
+      if (same(p, place(first)) || list.some((q) => same(p, q))) continue;
+      list.push(p);
+    }
+    if (!first.email && author.email) first.email = author.email;
+    if (author.corresponding === true) first.corresponding = true;
+  }
+  return { ...paper, authors: merged };
+}
 
 const SCREENING_SCHEMA: Schema = {
   type: 'object',
@@ -317,7 +399,9 @@ export class AiToolsService {
     if (message.stop_reason === 'refusal') {
       throw this.ai.declined('Smart Fill declined this paper.');
     }
-    return this.parse<Record<string, unknown>>(feature, message);
+    return mergeRepeatedAuthors(
+      this.parse<Record<string, unknown>>(feature, message),
+    );
   }
 
   /** The AI part of the automatic initial check, from the app's digest of the PDF (never the file). */

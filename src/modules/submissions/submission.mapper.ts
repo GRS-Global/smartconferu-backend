@@ -181,6 +181,7 @@ export function toSubmission(
           department: a.department,
           city: a.city,
           country: a.country,
+          otherAffiliations: a.otherAffiliations,
           corresponding: a.isCorresponding,
           hasAccount: a.userId !== null,
         }))

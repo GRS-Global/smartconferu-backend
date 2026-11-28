@@ -1,0 +1,1 @@
+ALTER TABLE "submission_authors" ADD COLUMN "other_affiliations" jsonb DEFAULT '[]'::jsonb NOT NULL;

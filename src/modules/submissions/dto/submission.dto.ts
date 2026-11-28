@@ -36,6 +36,37 @@ const cleanKeywords = ({ value }: { value: unknown }) =>
 
 // Requests ----------------------------------------------------------------------------------
 
+/** One affiliation of an author who belongs to more than one institution. */
+export class AuthorPlaceDto {
+  @ApiPropertyOptional({ nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(300)
+  affiliation?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(300)
+  department?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(120)
+  city?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, type: String })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsString()
+  @MaxLength(100)
+  country?: string | null;
+}
+
 export class AuthorDto {
   @ApiProperty({ example: 'Ada Lovelace' })
   @Transform(trim)
@@ -84,6 +115,18 @@ export class AuthorDto {
   @IsString()
   @MaxLength(100)
   country?: string | null;
+
+  @ApiPropertyOptional({
+    type: [AuthorPlaceDto],
+    description:
+      'The other affiliations of an author who belongs to more than one institution (the fields above are the primary one). One entry per affiliation, never a second author entry.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => AuthorPlaceDto)
+  otherAffiliations?: AuthorPlaceDto[];
 
   @ApiPropertyOptional({
     default: false,
@@ -350,6 +393,11 @@ export class AuthorResponse {
   @ApiProperty({ nullable: true, type: String }) department: string | null;
   @ApiProperty({ nullable: true, type: String }) city: string | null;
   @ApiProperty({ nullable: true, type: String }) country: string | null;
+  @ApiProperty({
+    type: [AuthorPlaceDto],
+    description: 'Further affiliations (the fields above are the primary one).',
+  })
+  otherAffiliations: AuthorPlaceDto[];
   @ApiProperty() corresponding: boolean;
   @ApiProperty({
     description: 'Has a Smartconferu account linked (has claimed the paper).',

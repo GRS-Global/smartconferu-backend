@@ -131,10 +131,11 @@ const envSchema = z.object({
    */
   EMAIL_ONLY_TO_ROLES: optionalText,
   /**
-   * Testing only: a new conference may have dates that are over (to try the app with a conference
-   * that already took place). Keep false (the default) in production.
+   * Testing: a new conference may have dates that are over (to try the app with a conference that
+   * already took place). On by default for now (owner's decision, 2026-11-28); set
+   * ALLOW_PAST_CONFERENCE_DATES=false to require today or a later date again.
    */
-  ALLOW_PAST_CONFERENCE_DATES: bool.default(false),
+  ALLOW_PAST_CONFERENCE_DATES: bool.default(true),
   /**
    * "Publish" on a Call for Papers opens it at once, without waiting for a Super Admin's approval, so a
    * chair can share the submission link straight away. On by default for now (owner's decision,

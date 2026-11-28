@@ -84,6 +84,14 @@ export const submissions = pgTable(
  * The author list of a submission, in order. `user_id` is set when the author's email belongs to
  * an account (now or later), which is what gives co-authors access.
  */
+/** One affiliation of an author: the institution, then its department, city and country. */
+export interface AuthorPlace {
+  affiliation: string | null;
+  department: string | null;
+  city: string | null;
+  country: string | null;
+}
+
 export const submissionAuthors = pgTable(
   'submission_authors',
   {
@@ -103,6 +111,15 @@ export const submissionAuthors = pgTable(
     department: text(),
     city: text(),
     country: text(),
+    /**
+     * Further affiliations of an author who belongs to more than one institution. The affiliation,
+     * department, city and country above are the primary one; each entry here has the same four
+     * fields. Empty for most authors.
+     */
+    otherAffiliations: jsonb('other_affiliations')
+      .$type<AuthorPlace[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     isCorresponding: boolean('is_corresponding').notNull().default(false),
   },
   (t) => [

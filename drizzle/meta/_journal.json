@@ -218,6 +218,13 @@
       "when": 1795852253796,
       "tag": "0030_author-email-optional",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795859779063,
+      "tag": "0031_author_other_affiliations",
+      "breakpoints": true
     }
   ]
 }
