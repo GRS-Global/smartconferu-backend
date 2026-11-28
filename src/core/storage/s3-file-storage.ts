@@ -7,7 +7,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
-import { FileStorage } from './file-storage.js';
+import { FileStorage, fileMissing } from './file-storage.js';
 
 export interface S3StorageOptions {
   endpoint: string;
@@ -90,9 +90,24 @@ export class S3FileStorage extends FileStorage {
   }
 
   async get(key: string): Promise<Buffer> {
-    const result = await this.client.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: this.key(key) }),
-    );
+    let result;
+    try {
+      result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: this.key(key) }),
+      );
+    } catch (error) {
+      const failure = error as {
+        name?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      if (
+        failure.name === 'NoSuchKey' ||
+        failure.$metadata?.httpStatusCode === 404
+      ) {
+        throw fileMissing();
+      }
+      throw error;
+    }
     if (!result.Body) {
       throw new Error(`Empty response for storage key: ${key}`);
     }

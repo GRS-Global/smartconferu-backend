@@ -1,5 +1,16 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
+import { HttpStatus } from '@nestjs/common';
+import { AppException, ErrorCode } from '../errors/app.exception.js';
+
+/** A stored file that is no longer there (the record says it exists, the storage has no such key): a 404 with a clear message, not a server error. */
+export function fileMissing(): AppException {
+  return new AppException(
+    HttpStatus.NOT_FOUND,
+    ErrorCode.NOT_FOUND,
+    "This file is no longer in the storage, so it can't be opened. Please upload it again.",
+  );
+}
 
 /**
  * Where uploaded files live. Keys are paths like `<conference>/<submission>/<name>`. One
@@ -38,8 +49,13 @@ export class LocalFileStorage extends FileStorage {
     await writeFile(path, data);
   }
 
-  get(key: string): Promise<Buffer> {
-    return readFile(this.path(key));
+  async get(key: string): Promise<Buffer> {
+    try {
+      return await readFile(this.path(key));
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') throw fileMissing();
+      throw error;
+    }
   }
 
   async delete(key: string): Promise<void> {

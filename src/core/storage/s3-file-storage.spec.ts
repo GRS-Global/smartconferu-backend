@@ -60,6 +60,18 @@ describe('S3FileStorage', () => {
     expect(data.toString('latin1')).toBe('%PDF');
   });
 
+  it('answers a missing file with a 404, not a server error', async () => {
+    const { storage } = fakeClient(() => {
+      throw Object.assign(new Error('The specified key does not exist.'), {
+        name: 'NoSuchKey',
+        $metadata: { httpStatusCode: 404 },
+      });
+    });
+    await expect(storage.get('c1/s1/gone.pdf')).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
   it('deletes one file', async () => {
     const { sent, storage } = fakeClient();
     await storage.delete('u1/photo-1.png');
