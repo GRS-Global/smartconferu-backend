@@ -82,6 +82,8 @@ export async function createTestApp(
     API_URL,
     // A developer's .env may hold the testing switch that stops emails to authors / reviewers; the tests send to everyone.
     EMAIL_ONLY_TO_ROLES: '',
+    // The approval flow is the default under test; the auto-approve default is tested on its own.
+    CFP_AUTO_APPROVE: 'false',
     MFA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     GOOGLE_CLIENT_ID: 'google-client',
     GOOGLE_CLIENT_SECRET: 'google-secret',

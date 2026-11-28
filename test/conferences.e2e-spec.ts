@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { CfpsService } from '../src/modules/conferences/cfps.service.js';
 import {
   createTestApp,
   type TestApp,
@@ -418,6 +419,28 @@ describe('Conferences, CFP and team', () => {
       await as(chair.token)
         .post(`/conferences/${created.body.id}/cfp/publish`)
         .expect(422);
+    });
+
+    it('opens at once, with no Super Admin approval, when CFP_AUTO_APPROVE is on (the default outside the tests)', async () => {
+      const chair = await person();
+      const id = await liveConference(chair);
+      const cfps = t.app.get(CfpsService) as unknown as { autoApprove: boolean };
+      cfps.autoApprove = true;
+      try {
+        const live = await as(chair.token)
+          .post(`/conferences/${id}/cfp/publish`)
+          .expect(200);
+        expect(live.body.status).toBe('published');
+        const page = await http()
+          .get(api('/public/conferences/isbm2027'))
+          .expect(200);
+        expect(page.body.cfpStatus).toBe('published');
+        const admin = await superAdmin();
+        const waiting = await as(admin.token).get('/admin/cfps').expect(200);
+        expect(waiting.body).toEqual([]);
+      } finally {
+        cfps.autoApprove = false;
+      }
     });
 
     it('goes live only once a Super Admin approves it, appears in the directory, then closes and reopens', async () => {
