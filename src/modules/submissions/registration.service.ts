@@ -63,7 +63,7 @@ export class RegistrationService {
       if (dto.presenterEmail) {
         const wanted = dto.presenterEmail.toLowerCase();
         const author = (await this.submissions.authors(tx, submissionId)).find(
-          (a) => a.email.toLowerCase() === wanted,
+          (a) => a.email?.toLowerCase() === wanted,
         );
         if (!author) {
           throw AppException.validation(

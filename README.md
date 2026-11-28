@@ -242,9 +242,22 @@ How it works:
 | Assigned reviewer | the paper page (no authors under double-blind review)                                         |
 
 - **Paper ids:** numbered per conference (`ICX-1`, `ICX-2` …) from `conferences.next_paper_no`.
-- **Authors:** each email once, at least one corresponding. An author whose email has an account
+- **Authors:** each email once, at least one corresponding (chosen by the person submitting;
+  nothing is ticked for them), and every corresponding author has an email. Other emails may
+  come later ("Will add later", `email: null`): an author submitting gives their own and at least
+  one co-author's (just their own on a one-author paper); a chair submitting on behalf needs only
+  the corresponding authors'. An author without an email gets no emails; when the email is added
+  (`PUT …/authors`, matched to the row by name) they are linked and told like a new co-author.
+  An author whose email has an account
   is linked at once, anyone else when they sign up; a linked author has "claimed" the paper. A
   chair who submitted for an author can edit the paper only until an author claims it.
+- **Titles:** one paper per title in a conference (withdrawn papers aside; case, spaces and
+  punctuation ignored), on submit and on a title change: `409 DUPLICATE_TITLE`, `details` naming
+  `title`. `GET …/submissions/duplicate-check` is the same check for the form's live warning.
+- **Whose paper:** a paper is mine as an author when I'm listed among its authors or submitted it
+  myself. A chair who submitted it on behalf is not an author (`core/rbac/authorship.ts`): it is
+  not in their `GET /submissions`, their author role, dashboard or author activity log, and
+  `mySubmission` / `myPaper` are false for them. `myPaper` is what My Submissions lists.
 - **Views:** `GET /submissions/{id}` answers with `view` = `chair`, `author` or `reviewer`. Authors
   see only what they were told: a recorded but unsent decision reads as `no_decision`. `can`
   says what the signed-in user may do now (edit, withdraw, decide…).

@@ -13,6 +13,7 @@ import {
 } from '../database/schema/index.js';
 import { AppException, ErrorCode } from '../errors/app.exception.js';
 import * as rules from './access-rules.js';
+import { authoredBy } from './authorship.js';
 import type {
   ConferenceAccess,
   MemberRole,
@@ -133,9 +134,7 @@ export class AccessService {
         isAuthor: sql<boolean>`exists (
           select 1 from ${submissions}
           where ${submissions.conferenceId} = ${conferenceId}
-            and (${submissions.submitterId} = ${user.id} or ${submissions.id} in (
-              select ${submissionAuthors.submissionId} from ${submissionAuthors}
-              where ${submissionAuthors.userId} = ${user.id})))`,
+            and ${authoredBy(user.id)})`,
       })
       .from(conferences)
       .where(eq(conferences.id, conferenceId));

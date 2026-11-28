@@ -1,4 +1,5 @@
 import * as rules from '../../core/rbac/access-rules.js';
+import { submittedAsAuthor } from '../../core/rbac/authorship.js';
 import type {
   AssignmentStatus,
   ConferenceAccess,
@@ -40,7 +41,7 @@ function registrationOf(
   const presenterEmail = r?.presenterEmail ?? null;
   const presenter = presenterEmail
     ? authors.find(
-        (a) => a.email.toLowerCase() === presenterEmail.toLowerCase(),
+        (a) => a.email?.toLowerCase() === presenterEmail.toLowerCase(),
       )
     : undefined;
   return {
@@ -221,9 +222,11 @@ export function toSubmission(
     withdrawnBy: s.withdrawnBy,
     submittedAt: s.submittedAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),
-    mySubmission: s.submitterId === userId,
+    mySubmission: submittedAsAuthor(s, userId),
+    myPaper:
+      submittedAsAuthor(s, userId) || authors.some((a) => a.userId === userId),
     myCorresponding:
-      s.submitterId === userId ||
+      submittedAsAuthor(s, userId) ||
       authors.some((a) => a.userId === userId && a.isCorresponding),
     can: {
       editDetails: rules.canEditDetails(access),

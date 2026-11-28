@@ -27,6 +27,8 @@ export const ErrorCode = {
   NOT_FOUND: 'NOT_FOUND',
   VALIDATION_FAILED: 'VALIDATION_FAILED',
   CONFLICT: 'CONFLICT',
+  /** Another paper in the conference already has this title (submit, or change a title). */
+  DUPLICATE_TITLE: 'DUPLICATE_TITLE',
   BUSINESS_RULE: 'BUSINESS_RULE',
   RATE_LIMITED: 'RATE_LIMITED',
   NOT_READY: 'NOT_READY',

@@ -385,7 +385,12 @@ describe('Submissions, screening and the email queue', () => {
           onBehalf: true,
         })
         .expect(201);
-      expect(behalf.body).toMatchObject({ view: 'chair', mySubmission: true });
+      // The chair submitted it for the author: it isn't one of the chair's own papers.
+      expect(behalf.body).toMatchObject({
+        view: 'chair',
+        mySubmission: false,
+        myPaper: false,
+      });
       await t.sendQueuedEmails();
       expect(await templatesTo(author.email)).toEqual([
         { template_key: 'submittedOnBehalf', status: 'sent' },
@@ -845,6 +850,219 @@ describe('Submissions, screening and the email queue', () => {
       } finally {
         transport.send = original;
       }
+    });
+  });
+  describe('author emails, duplicate titles and on-behalf papers', () => {
+    const url = (id: string) => `/conferences/${id}/submissions`;
+    const none = null as unknown as string;
+
+    it('needs the submitter and one co-author email; the others can come later', async () => {
+      const chair = await person();
+      const author = await person();
+      const conferenceId = await openConference(chair);
+      const only = (emails: string[]) =>
+        paper(
+          emails.map((email, i) => ({
+            name: `Author ${i + 1}`,
+            email,
+            corresponding: i === 0,
+          })),
+        );
+
+      // A paper with co-authors: one co-author email at least, as well as the submitter's.
+      const short = await as(author.token)
+        .post(url(conferenceId), only([author.email, none, none]))
+        .expect(400);
+      expect(short.body.message).toBe(
+        'Give the email of at least one co-author as well as your own. The others can be added later.',
+      );
+      const made = await as(author.token)
+        .post(url(conferenceId), only([author.email, 'b@x.example', none]))
+        .expect(201);
+      expect(made.body.authors.map((a: { email: unknown }) => a.email)).toEqual(
+        [author.email, 'b@x.example', null],
+      );
+
+      // A one-author paper needs only the author's own email.
+      await as(author.token)
+        .post(url(conferenceId), {
+          ...only([author.email]),
+          title: 'A paper written alone',
+        })
+        .expect(201);
+
+      // Nobody is emailed at an address that isn't there.
+      await t.sendQueuedEmails();
+      expect(t.outbox().every((m) => typeof m.to === 'string' && m.to)).toBe(
+        true,
+      );
+    });
+
+    it('needs a chosen corresponding author, with an email', async () => {
+      const chair = await person();
+      const author = await person();
+      const conferenceId = await openConference(chair);
+      const nobody = await as(author.token)
+        .post(
+          url(conferenceId),
+          paper([
+            { name: 'Ada', email: author.email },
+            { name: 'Bo', email: 'bo@x.example' },
+          ]),
+        )
+        .expect(400);
+      expect(nobody.body.message).toBe('Choose the corresponding author.');
+
+      const noEmail = await as(chair.token)
+        .post(url(conferenceId), {
+          ...paper([{ name: 'Ada', email: none, corresponding: true }]),
+          onBehalf: true,
+        })
+        .expect(400);
+      expect(noEmail.body.message).toBe(
+        'Author 1 is a corresponding author, so they need an email.',
+      );
+    });
+
+    it("on behalf: only the corresponding author needs an email, and the paper is not the chair's", async () => {
+      const chair = await person();
+      const author = await person();
+      const conferenceId = await openConference(chair);
+      const made = await as(chair.token)
+        .post(url(conferenceId), {
+          ...paper([
+            { name: 'Ada', email: author.email, corresponding: true },
+            { name: 'Bo', email: none },
+            { name: 'Cy', email: none },
+          ]),
+          onBehalf: true,
+        })
+        .expect(201);
+      expect(made.body).toMatchObject({ mySubmission: false, myPaper: false });
+
+      // Not in the chair's own papers, their author role or their author activity log...
+      expect(
+        (await as(chair.token).get('/submissions').expect(200)).body,
+      ).toEqual([]);
+      const conferences = await as(chair.token)
+        .get('/me/conferences')
+        .expect(200);
+      expect(JSON.stringify(conferences.body)).not.toMatch(/"author"/);
+      expect(
+        (
+          await as(chair.token)
+            .get(`/conferences/${conferenceId}/my-activity?role=author`)
+            .expect(200)
+        ).body,
+      ).toEqual([]);
+
+      // ...but the author's.
+      const authorView = await as(author.token).get('/submissions').expect(200);
+      expect(authorView.body).toHaveLength(1);
+      expect(authorView.body[0]).toMatchObject({ myPaper: true });
+      const log = await as(author.token)
+        .get(`/conferences/${conferenceId}/my-activity?role=author`)
+        .expect(200);
+      expect(
+        (log.body as { description: string }[]).map((e) => e.description),
+      ).toContain('Submitted ICX-1.');
+    });
+
+    it("a co-author's email added later links their account and tells them", async () => {
+      const chair = await person();
+      const author = await person();
+      const later = await person({ firstName: 'Lena', lastName: 'Later' });
+      const conferenceId = await openConference(chair);
+      const made = await as(author.token)
+        .post(
+          url(conferenceId),
+          paper([
+            { name: 'Ada', email: author.email, corresponding: true },
+            { name: 'Bo', email: 'bo@x.example' },
+            { name: 'Lena Later', email: none },
+          ]),
+        )
+        .expect(201);
+      await t.sendQueuedEmails();
+      t.outbox().length = 0;
+      expect(
+        (await as(later.token).get('/submissions').expect(200)).body,
+      ).toEqual([]);
+
+      const authors = (
+        made.body.authors as {
+          name: string;
+          email: string | null;
+          corresponding: boolean;
+        }[]
+      ).map((a) => ({
+        name: a.name,
+        email: a.name === 'Lena Later' ? later.email : (a.email as string),
+        corresponding: a.corresponding,
+      }));
+      await as(author.token)
+        .put(`/submissions/${made.body.id}/authors`, {
+          authors: withPlace(authors),
+        })
+        .expect(200);
+      await t.sendQueuedEmails();
+      expect(t.outbox().map((m) => m.to)).toEqual([later.email]);
+      expect(
+        (await as(later.token).get('/submissions').expect(200)).body,
+      ).toHaveLength(1);
+    });
+
+    it('refuses a title another paper of the conference already has, on submit and on edit', async () => {
+      const chair = await person();
+      const author = await person();
+      const conferenceId = await openConference(chair);
+      const two = (title: string) => ({
+        ...paper([
+          { name: 'Ada', email: author.email, corresponding: true },
+          { name: 'Bo', email: 'bo@x.example' },
+        ]),
+        title,
+      });
+      const first = await as(author.token)
+        .post(url(conferenceId), two('Graph networks for protein folding'))
+        .expect(201);
+      const again = await as(author.token)
+        .post(url(conferenceId), two('GRAPH networks, for protein-folding!'))
+        .expect(409);
+      expect(again.body).toMatchObject({
+        code: 'DUPLICATE_TITLE',
+        message:
+          'A paper with this title is already submitted to this conference. Please use a different title.',
+        details: [
+          { field: 'title', errors: ['already used by another paper'] },
+        ],
+      });
+
+      const second = await as(author.token)
+        .post(url(conferenceId), two('Another paper'))
+        .expect(201);
+      await as(author.token)
+        .patch(`/submissions/${second.body.id}`, {
+          title: 'Graph Networks for Protein Folding',
+          abstract: 'x',
+        })
+        .expect(409);
+      // A paper keeps its own title, and a withdrawn paper's title is free again.
+      await as(author.token)
+        .patch(`/submissions/${first.body.id}`, {
+          title: 'Graph networks for protein folding',
+          abstract: 'Shorter.',
+        })
+        .expect(200);
+      await as(author.token)
+        .post(`/submissions/${first.body.id}/withdraw`, {})
+        .expect(200);
+      await as(author.token)
+        .patch(`/submissions/${second.body.id}`, {
+          title: 'Graph networks for protein folding',
+          abstract: 'x',
+        })
+        .expect(200);
     });
   });
 });

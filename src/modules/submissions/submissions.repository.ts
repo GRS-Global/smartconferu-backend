@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { authoredBy } from '../../core/rbac/authorship.js';
 import type { Executor, Tx } from '../../core/database/database.types.js';
 import {
   cfps,
@@ -36,7 +37,8 @@ export interface ConferenceInfo {
 
 export interface NewAuthor {
   name: string;
-  email: string;
+  /** Null while it is still to come. */
+  email: string | null;
   affiliation: string | null;
   department: string | null;
   city: string | null;
@@ -209,9 +211,11 @@ export class SubmissionsRepository {
   }
 
   /**
-   * Replaces the author list. Authors whose email stays are updated in place (their account link
-   * is kept); removed ones are deleted; new ones are inserted and linked to an account with that
-   * email. Returns the authors that are new to the paper.
+   * Replaces the author list. An author is matched to their current row by email, or (while their
+   * email is still to come) by name; matched rows are updated in place and keep their account link.
+   * Removed authors are deleted. New authors, and authors whose email is given for the first time,
+   * are linked to an account with that email and returned: they are the ones to tell. An author
+   * with no email yet is never returned (there is nobody to tell).
    */
   async replaceAuthors(
     tx: Tx,
@@ -219,22 +223,48 @@ export class SubmissionsRepository {
     authors: readonly NewAuthor[],
   ): Promise<AuthorRow[]> {
     const current = await this.authors(tx, submissionId);
-    const byEmail = new Map(current.map((a) => [lowerEmail(a.email), a]));
-    const keep = new Set(authors.map((a) => lowerEmail(a.email)));
-    const gone = current.filter((a) => !keep.has(lowerEmail(a.email)));
-    if (gone.length > 0) {
+    const free = new Set(current);
+    const byEmail = new Map(
+      current.filter((a) => a.email).map((a) => [lowerEmail(a.email!), a]),
+    );
+    const lowerName = (name: string) => name.trim().toLowerCase();
+    // First the email matches, then authors still without an email by name, so an email that
+    // moves to another name never takes over someone else's row.
+    const matched = authors.map((author) => {
+      const row = author.email
+        ? byEmail.get(lowerEmail(author.email))
+        : undefined;
+      if (row) {
+        free.delete(row);
+      }
+      return row;
+    });
+    authors.forEach((author, i) => {
+      if (matched[i]) {
+        return;
+      }
+      const row = [...free].find(
+        (a) => !a.email && lowerName(a.name) === lowerName(author.name),
+      );
+      if (row) {
+        free.delete(row);
+        matched[i] = row;
+      }
+    });
+    if (free.size > 0) {
       await tx.delete(submissionAuthors).where(
         inArray(
           submissionAuthors.id,
-          gone.map((a) => a.id),
+          [...free].map((a) => a.id),
         ),
       );
     }
+    // An account to link: for every author whose email is new on this paper.
+    const isNewEmail = (author: NewAuthor, i: number) =>
+      author.email !== null && !matched[i]?.email;
     const accounts = await this.accountsByEmail(
       tx,
-      authors
-        .filter((a) => !byEmail.has(lowerEmail(a.email)))
-        .map((a) => a.email),
+      authors.filter(isNewEmail).map((a) => a.email!),
     );
     const added: AuthorRow[] = [];
     for (const [position, author] of authors.entries()) {
@@ -248,22 +278,29 @@ export class SubmissionsRepository {
         country: author.country,
         isCorresponding: author.corresponding,
       };
-      const existing = byEmail.get(lowerEmail(author.email));
+      const userId =
+        author.email !== null
+          ? (accounts.get(lowerEmail(author.email)) ?? null)
+          : null;
+      const existing = matched[position];
       if (existing) {
-        await tx
+        const emailNow = isNewEmail(author, position);
+        const [row] = await tx
           .update(submissionAuthors)
-          .set(fields)
-          .where(eq(submissionAuthors.id, existing.id));
+          .set(emailNow ? { ...fields, userId } : fields)
+          .where(eq(submissionAuthors.id, existing.id))
+          .returning();
+        if (emailNow) {
+          added.push(row);
+        }
       } else {
         const [row] = await tx
           .insert(submissionAuthors)
-          .values({
-            submissionId,
-            ...fields,
-            userId: accounts.get(lowerEmail(author.email)) ?? null,
-          })
+          .values({ submissionId, ...fields, userId })
           .returning();
-        added.push(row);
+        if (author.email !== null) {
+          added.push(row);
+        }
       }
     }
     return added;
@@ -335,18 +372,9 @@ export class SubmissionsRepository {
     return this.bundles(executor, eq(submissions.conferenceId, conferenceId));
   }
 
-  /** Papers the user submitted or co-authors, optionally in one conference. */
+  /** The user's papers as an author (listed on it, or submitted it not for someone else), optionally in one conference. */
   authoredPapers(executor: Executor, userId: string, conferenceId?: string) {
-    const mine = or(
-      eq(submissions.submitterId, userId),
-      inArray(
-        submissions.id,
-        executor
-          .select({ id: submissionAuthors.submissionId })
-          .from(submissionAuthors)
-          .where(eq(submissionAuthors.userId, userId)),
-      ),
-    );
+    const mine = authoredBy(userId);
     return this.bundles(
       executor,
       conferenceId
@@ -410,6 +438,8 @@ export class SubmissionsRepository {
     conferenceId: string,
     title: string,
     userId: string,
+    /** The paper being edited: it doesn't count against itself. */
+    exceptId?: string,
   ): Promise<{ found: boolean; mine: boolean }> {
     const normalized = title.toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (normalized === '') {
@@ -422,6 +452,7 @@ export class SubmissionsRepository {
         and(
           eq(submissions.conferenceId, conferenceId),
           ne(submissions.status, 'withdrawn'),
+          exceptId ? ne(submissions.id, exceptId) : undefined,
           sql`regexp_replace(lower(${submissions.title}), '[^a-z0-9]+', '', 'g') = ${normalized}`,
         ),
       );

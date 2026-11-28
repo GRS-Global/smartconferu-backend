@@ -96,7 +96,8 @@ export const submissionAuthors = pgTable(
       onDelete: 'set null',
     }),
     name: text().notNull(),
-    email: text().notNull(),
+    /** Null while the author's email is still to come ("Will add later"); they get no emails until it is added. */
+    email: text(),
     /** The institution only (no department, city or country: those have their own fields). */
     affiliation: text(),
     department: text(),

@@ -7,9 +7,9 @@ import {
   inArray,
   isNull,
   ne,
-  or,
   sql,
 } from 'drizzle-orm';
+import { authoredBy } from '../../core/rbac/authorship.js';
 import type { Executor } from '../../core/database/database.types.js';
 import {
   conferenceMembers,
@@ -18,7 +18,6 @@ import {
   profiles,
   reviewAssignments,
   reviews,
-  submissionAuthors,
   submissions,
   users,
 } from '../../core/database/schema/index.js';
@@ -178,12 +177,8 @@ export class UsersRepository {
       .orderBy(asc(conferences.acronym));
   }
 
-  /** Papers the user submitted or is listed on as an author. */
+  /** The user's papers as an author: listed on it, or submitted it (not for someone else). */
   dashboardAuthorPapers(tx: Executor, userId: string) {
-    const listedAsAuthor = tx
-      .select({ id: submissionAuthors.submissionId })
-      .from(submissionAuthors)
-      .where(eq(submissionAuthors.userId, userId));
     return tx
       .select({
         submissionId: submissions.id,
@@ -193,12 +188,7 @@ export class UsersRepository {
         notifiedOutcome: submissions.notifiedOutcome,
       })
       .from(submissions)
-      .where(
-        or(
-          eq(submissions.submitterId, userId),
-          inArray(submissions.id, listedAsAuthor),
-        ),
-      )
+      .where(authoredBy(userId))
       .orderBy(asc(submissions.conferenceId), asc(submissions.paperNo));
   }
 

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { submittedAsAuthor } from '../../core/rbac/authorship.js';
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
@@ -174,6 +175,7 @@ export class MyActivityService {
           id: submissions.id,
           paperNo: submissions.paperNo,
           submitterId: submissions.submitterId,
+          details: submissions.details,
         })
         .from(submissions)
         .where(eq(submissions.conferenceId, conferenceId));
@@ -185,9 +187,10 @@ export class MyActivityService {
         return [];
       }
 
-      // The papers this person is concerned with, and the ids that tie an audit row to them.
+      // The papers this person is concerned with, and the ids that tie an audit row to them. A
+      // paper a chair submitted on an author's behalf is not the chair's as an author.
       const mineAsAuthor = new Set<string>(
-        papers.filter((p) => p.submitterId === user.id).map((p) => p.id),
+        papers.filter((p) => submittedAsAuthor(p, user.id)).map((p) => p.id),
       );
       for (const a of await tx
         .select({ submissionId: submissionAuthors.submissionId })

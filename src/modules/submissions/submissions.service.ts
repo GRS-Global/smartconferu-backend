@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { AuditService } from '../../core/audit/audit.service.js';
 import type { AuthUser } from '../../core/auth/auth-user.js';
 import { DatabaseService } from '../../core/database/database.service.js';
@@ -6,7 +6,7 @@ import type { Executor, Tx } from '../../core/database/database.types.js';
 import { EmailQueueService } from '../../core/email/email-queue.service.js';
 import { EmailRecipientsService } from '../../core/email/email-recipients.service.js';
 import { emailDate, stripTags } from '../../core/email/email-render.js';
-import { AppException } from '../../core/errors/app.exception.js';
+import { AppException, ErrorCode } from '../../core/errors/app.exception.js';
 import type { ClientInfo } from '../../core/http/client-info.js';
 import { NotificationsService } from '../../core/notifications/notifications.service.js';
 import * as rules from '../../core/rbac/access-rules.js';
@@ -45,10 +45,24 @@ import { appPaths } from '../../core/http/app-paths.js';
 /** How many authors (from the top) must give affiliation, city and country. Same number in the frontend. */
 const AUTHORS_WITH_PLACE = 2;
 
-/** One email per author, at least one corresponding, the first two with their place. */
-function checkAuthors(authors: readonly AuthorDto[]): NewAuthor[] {
+/** How many authors must give an email when an author submits (fewer when the paper has fewer authors). Same number in the frontend. */
+const AUTHOR_EMAILS_REQUIRED = 2;
+
+/**
+ * The author list's rules. Each email once; at least one corresponding author, each with an email;
+ * the first two authors with their place. Other emails may come later ("Will add later"), but an
+ * author submitting gives at least two (their own and a co-author's) when the paper has co-authors.
+ * A chair submitting on an author's behalf needs only the corresponding authors' emails.
+ */
+function checkAuthors(
+  authors: readonly AuthorDto[],
+  { onBehalf }: { onBehalf: boolean },
+): NewAuthor[] {
   const seen = new Set<string>();
   for (const author of authors) {
+    if (!author.email) {
+      continue;
+    }
     const email = author.email.toLowerCase();
     if (seen.has(email)) {
       throw AppException.validation(
@@ -58,7 +72,19 @@ function checkAuthors(authors: readonly AuthorDto[]): NewAuthor[] {
     seen.add(email);
   }
   if (!authors.some((a) => a.corresponding)) {
-    throw AppException.validation('Mark at least one corresponding author.');
+    throw AppException.validation('Choose the corresponding author.');
+  }
+  const noEmail = authors.findIndex((a) => a.corresponding && !a.email);
+  if (noEmail >= 0) {
+    throw AppException.validation(
+      `Author ${noEmail + 1} is a corresponding author, so they need an email.`,
+    );
+  }
+  const needed = Math.min(AUTHOR_EMAILS_REQUIRED, authors.length);
+  if (!onBehalf && seen.size < needed) {
+    throw AppException.validation(
+      'Give the email of at least one co-author as well as your own. The others can be added later.',
+    );
   }
   // The first two authors must say where they are; the others may leave it out.
   authors.slice(0, AUTHORS_WITH_PLACE).forEach((a, i) => {
@@ -75,7 +101,7 @@ function checkAuthors(authors: readonly AuthorDto[]): NewAuthor[] {
   });
   return authors.map((a) => ({
     name: a.name,
-    email: a.email,
+    email: a.email ?? null,
     affiliation: a.affiliation ?? null,
     department: a.department ?? null,
     city: a.city ?? null,
@@ -126,7 +152,9 @@ export class SubmissionsService {
     dto: CreateSubmissionDto,
     client: ClientInfo,
   ): Promise<SubmissionResponse> {
-    const authors = checkAuthors(dto.authors);
+    const authors = checkAuthors(dto.authors, {
+      onBehalf: dto.onBehalf === true,
+    });
     return this.database.transaction(async (tx) => {
       const { access, info } = await this.openConference(
         tx,
@@ -159,6 +187,8 @@ export class SubmissionsService {
             : 'The submission deadline has passed.',
         );
       }
+
+      await this.refuseDuplicateTitle(tx, user, conferenceId, dto.title);
 
       const submission = await this.submissions.insert(tx, {
         conferenceId,
@@ -300,7 +330,7 @@ export class SubmissionsService {
     client: ClientInfo,
   ): Promise<SubmissionResponse> {
     return this.database.transaction(async (tx) => {
-      const { access } = await this.lock(tx, user, submissionId);
+      const { access, submission } = await this.lock(tx, user, submissionId);
       if (!rules.isOpenForChanges(access)) {
         throw AppException.businessRule('This paper can no longer be changed.');
       }
@@ -309,6 +339,13 @@ export class SubmissionsService {
           'Only the authors of this paper can change its details (a chair can until an author claims it).',
         );
       }
+      await this.refuseDuplicateTitle(
+        tx,
+        user,
+        submission.conferenceId,
+        dto.title,
+        submissionId,
+      );
       await this.submissions.update(tx, submissionId, {
         title: dto.title,
         abstract: dto.abstract,
@@ -335,7 +372,6 @@ export class SubmissionsService {
     authors: readonly AuthorDto[],
     client: ClientInfo,
   ): Promise<SubmissionResponse> {
-    const list = checkAuthors(authors);
     return this.database.transaction(async (tx) => {
       const { access, submission } = await this.lock(tx, user, submissionId);
       if (!rules.isOpenForChanges(access)) {
@@ -346,6 +382,9 @@ export class SubmissionsService {
           'Only the person who submitted this paper can change its authors (a chair can until an author claims it).',
         );
       }
+      const onBehalf =
+        (submission.details as Record<string, unknown>).onBehalf === true;
+      const list = checkAuthors(authors, { onBehalf });
       const added = await this.submissions.replaceAuthors(
         tx,
         submissionId,
@@ -357,8 +396,6 @@ export class SubmissionsService {
       ))!;
       const ctx = await this.context(tx, user, info, submissionId);
       await this.notifyCoAuthors(tx, ctx, added, user.id);
-      const onBehalf =
-        (submission.details as Record<string, unknown>).onBehalf === true;
       await this.emails.enqueue(
         tx,
         'paper_authors_updated',
@@ -595,6 +632,9 @@ export class SubmissionsService {
       const ctx = await this.context(tx, user, info, submissionId);
       const known = new Map<string, { email: string; name: string }>();
       for (const a of ctx.authors) {
+        if (!a.email) {
+          continue;
+        }
         known.set(a.email.trim().toLowerCase(), {
           email: a.email.trim(),
           name: a.name,
@@ -744,6 +784,35 @@ export class SubmissionsService {
   }
 
   /** The paper locked for a change, and the user's standing on it (404 if they can't see it). */
+  /**
+   * One paper per title in a conference (withdrawn papers aside): the same check as the New
+   * Submission page's warning, ignoring case, spaces and punctuation. Answers 409 with the title
+   * field named, so the form can show it there.
+   */
+  private async refuseDuplicateTitle(
+    tx: Tx,
+    user: AuthUser,
+    conferenceId: string,
+    title: string,
+    exceptId?: string,
+  ) {
+    const { found } = await this.submissions.duplicate(
+      tx,
+      conferenceId,
+      title,
+      user.id,
+      exceptId,
+    );
+    if (found) {
+      throw new AppException(
+        HttpStatus.CONFLICT,
+        ErrorCode.DUPLICATE_TITLE,
+        'A paper with this title is already submitted to this conference. Please use a different title.',
+        [{ field: 'title', errors: ['already used by another paper'] }],
+      );
+    }
+  }
+
   private async lock(tx: Tx, user: AuthUser, submissionId: string) {
     const submission = await this.submissions.findForUpdate(tx, submissionId);
     if (!submission) {

@@ -215,7 +215,7 @@ export class ActivityPage {
 
 class AdminPaperAuthor {
   @ApiProperty() name: string;
-  @ApiProperty() email: string;
+  @ApiProperty({ nullable: true, type: String }) email: string | null;
   @ApiProperty({ nullable: true, type: String }) affiliation: string | null;
   @ApiProperty() corresponding: boolean;
 }

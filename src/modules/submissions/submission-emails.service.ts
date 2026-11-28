@@ -75,7 +75,11 @@ export class SubmissionEmailsService {
     const submitter = (
       await this.recipients.people(executor, [ctx.submission.submitterId])
     ).get(ctx.submission.submitterId);
-    const person = (a: AuthorRow): Recipient => ({
+    // Authors whose email is still to come hear nothing until it is added.
+    const reachable = ctx.authors.filter(
+      (a): a is AuthorRow & { email: string } => a.email !== null,
+    );
+    const person = (a: AuthorRow & { email: string }): Recipient => ({
       email: a.email,
       name: a.name,
       hasAccount: a.userId !== null,
@@ -92,10 +96,10 @@ export class SubmissionEmailsService {
             },
           ]
         : []),
-      ...ctx.authors.filter((a) => a.isCorresponding).map(person),
+      ...reachable.filter((a) => a.isCorresponding).map(person),
     ]);
     const submitterEmail = submitter ? key(submitter.email) : '';
-    const coAuthors = unique(ctx.authors.map(person)).filter(
+    const coAuthors = unique(reachable.map(person)).filter(
       (a) => key(a.email) !== submitterEmail,
     );
     return { updates, coAuthors, submitterEmail };
@@ -288,7 +292,9 @@ export class SubmissionEmailsService {
       return [];
     }
     const { coAuthors } = await this.authorRecipients(executor, ctx);
-    const addedKeys = new Set(added.map((a) => key(a.email)));
+    const addedKeys = new Set(
+      added.flatMap((a) => (a.email ? [key(a.email)] : [])),
+    );
     const list = coAuthors.filter((a) => addedKeys.has(key(a.email)));
     const behalfTo = onBehalf ? list.filter((a) => a.corresponding) : [];
     const others = list.filter((a) => !behalfTo.includes(a));

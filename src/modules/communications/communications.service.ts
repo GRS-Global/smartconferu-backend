@@ -492,6 +492,7 @@ export class CommunicationsService {
           )) {
             for (const a of authorRows) {
               if (
+                a.email &&
                 a.submissionId === paper.id &&
                 (audience !== 'corresponding_authors' || a.corresponding)
               ) {

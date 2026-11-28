@@ -14,6 +14,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm';
+import { authoredBy } from '../../core/rbac/authorship.js';
 import type { Executor } from '../../core/database/database.types.js';
 import { DECISION_TEMPLATE_KEYS } from './decision-emails.js';
 import {
@@ -25,7 +26,6 @@ import {
   decisionTypes,
   emailTemplates,
   profiles,
-  submissionAuthors,
   submissions,
   users,
 } from '../../core/database/schema/index.js';
@@ -201,9 +201,7 @@ export class ConferencesRepository {
     const authored = sql<boolean>`exists (
       select 1 from ${submissions}
       where ${submissions.conferenceId} = ${conferences.id}
-        and (${submissions.submitterId} = ${userId} or ${submissions.id} in (
-          select ${submissionAuthors.submissionId} from ${submissionAuthors}
-          where ${submissionAuthors.userId} = ${userId})))`;
+        and ${authoredBy(userId)})`;
     const teamMember = sql<boolean>`exists (
       select 1 from ${conferenceMembers}
       where ${conferenceMembers.conferenceId} = ${conferences.id}

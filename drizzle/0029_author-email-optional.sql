@@ -1,0 +1,1 @@
+ALTER TABLE "submission_authors" ALTER COLUMN "email" DROP NOT NULL;

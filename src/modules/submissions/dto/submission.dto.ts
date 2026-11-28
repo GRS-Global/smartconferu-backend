@@ -44,11 +44,18 @@ export class AuthorDto {
   @MaxLength(200)
   name: string;
 
-  @ApiProperty({ example: 'ada@university.edu' })
-  @Transform(trim)
-  @IsEmail({}, { message: 'Every author needs a valid email.' })
+  @ApiPropertyOptional({
+    example: 'ada@university.edu',
+    nullable: true,
+    type: String,
+    description:
+      'Empty while it is still to come ("Will add later"). The corresponding authors always need one; an author submitting gives their own and at least one co-author\'s (when the paper has co-authors).',
+  })
+  @IsOptional()
+  @Transform(trimToNull)
+  @IsEmail({}, { message: "That isn't a valid email address." })
   @MaxLength(254)
-  email: string;
+  email?: string | null;
 
   @ApiPropertyOptional({ nullable: true, type: String })
   @IsOptional()
@@ -116,7 +123,7 @@ export class AuthorListDto {
   @ApiProperty({
     type: [AuthorDto],
     description:
-      'In order. At least one, each email once, at least one corresponding.',
+      'In order. At least one author, each email once, at least one corresponding author, and every corresponding author has an email.',
   })
   @IsArray()
   @ArrayMinSize(1, { message: 'A paper needs at least one author.' })
@@ -333,7 +340,12 @@ export class RegistrationResponse {
 
 export class AuthorResponse {
   @ApiProperty() name: string;
-  @ApiProperty() email: string;
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description: 'Null while it is still to come ("Will add later").',
+  })
+  email: string | null;
   @ApiProperty({ nullable: true, type: String }) affiliation: string | null;
   @ApiProperty({ nullable: true, type: String }) department: string | null;
   @ApiProperty({ nullable: true, type: String }) city: string | null;
@@ -436,11 +448,19 @@ export class SubmissionResponse {
   withdrawnBy: string | null;
   @ApiProperty() submittedAt: string;
   @ApiProperty() updatedAt: string;
-  @ApiProperty({ description: 'The signed-in account submitted it.' })
+  @ApiProperty({
+    description:
+      'The signed-in account submitted it as an author (a chair who submitted it on behalf of an author did not).',
+  })
   mySubmission: boolean;
   @ApiProperty({
     description:
-      'The signed-in account gets the email updates (submitter or a corresponding author).',
+      "One of the signed-in account's papers as an author: listed among its authors, or mySubmission. What My Submissions lists.",
+  })
+  myPaper: boolean;
+  @ApiProperty({
+    description:
+      'The signed-in account gets the email updates as an author (mySubmission, or a corresponding author).',
   })
   myCorresponding: boolean;
   @ApiProperty({

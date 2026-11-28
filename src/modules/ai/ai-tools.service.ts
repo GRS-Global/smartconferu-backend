@@ -92,7 +92,11 @@ const PAPER_SCHEMA: Schema = {
               'Country of this author\'s affiliation, in English (e.g. "India", "United States"). If it isn\'t written, infer it from the institution, city or address, or the email\'s country domain; leave empty only if there is no clue at all.',
           },
           email: { type: 'string' },
-          corresponding: { type: 'boolean' },
+          corresponding: {
+            type: 'boolean',
+            description:
+              'True only when the paper itself marks this author as a corresponding author (e.g. "Corresponding author", an asterisk or envelope tied to that note). Do not guess: when the paper marks nobody, every author is false and the person submitting chooses.',
+          },
         },
         required: [
           'name',

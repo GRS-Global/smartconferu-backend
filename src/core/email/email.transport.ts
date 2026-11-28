@@ -106,7 +106,10 @@ export class ResendTransport extends EmailTransport {
 
   /** Up to 100 emails per request (Resend's batch endpoint). The batch endpoint takes no attachments, so an email with files goes on its own. */
   override async sendBatch(emails: SentEmail[]): Promise<BatchResult[]> {
-    const results: BatchResult[] = Array.from({ length: emails.length }, () => ({}));
+    const results: BatchResult[] = Array.from(
+      { length: emails.length },
+      () => ({}),
+    );
     const plain: number[] = [];
     for (const [i, email] of emails.entries()) {
       if (!email.attachments?.length) {
